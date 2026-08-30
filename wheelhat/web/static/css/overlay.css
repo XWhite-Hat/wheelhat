@@ -1,0 +1,163 @@
+/* Browser-source styles. The page background stays transparent so OBS composites
+   the wheel straight over the scene. */
+
+:root {
+  --wh-font: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --wh-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--wh-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  transition: opacity 420ms ease, transform 420ms ease;
+}
+
+.stage[data-hidden='true'] {
+  opacity: 0;
+  transform: scale(0.94);
+  pointer-events: none;
+}
+
+.title {
+  font-size: clamp(18px, 3.2vh, 34px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
+}
+
+.wheel-wrap {
+  position: relative;
+  flex: 0 1 auto;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(var(--wh-shadow));
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------------ result */
+
+.result {
+  --result-accent: #ffffff;
+  padding: 10px 26px;
+  border-radius: 999px;
+  background: rgba(12, 14, 18, 0.82);
+  border: 2px solid var(--result-accent);
+  color: #fff;
+  text-align: center;
+  animation: pop 420ms cubic-bezier(0.18, 1.2, 0.4, 1);
+  max-width: 92vw;
+}
+
+.result-label {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.result-value {
+  font-size: clamp(20px, 4vh, 42px);
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ----------------------------------------------------------------- message */
+
+.message {
+  position: absolute;
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.7);
+  animation: pop 320ms ease;
+  pointer-events: none;
+}
+
+.message[data-style='banner'] {
+  top: 4%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 28px;
+  border-radius: 14px;
+  background: rgba(12, 14, 18, 0.86);
+  font-size: clamp(16px, 3vh, 30px);
+  max-width: 90%;
+}
+
+.message[data-style='toast'] {
+  right: 3%;
+  bottom: 4%;
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: rgba(12, 14, 18, 0.9);
+  font-size: clamp(13px, 2vh, 20px);
+  max-width: 45%;
+}
+
+.message[data-style='fullscreen'] {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 9, 12, 0.72);
+  font-size: clamp(28px, 9vh, 96px);
+  padding: 5%;
+}
+
+/* -------------------------------------------------------------- connection */
+
+.connection {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(190, 40, 40, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.connection[hidden] {
+  display: none;
+}

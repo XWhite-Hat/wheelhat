@@ -1,0 +1,18 @@
+# Normalise line endings so Windows and Linux contributors do not fight.
+* text=auto eol=lf
+
+# Windows-only entry points must keep CRLF or cmd.exe mis-parses them.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp3 binary
+*.wav binary
+*.db binary
+
+# Keep generated/vendored files out of language stats and diffs
+*.svg linguist-detectable=false

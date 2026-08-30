@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest something WheelHat should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do on stream?
+      description: Describe the situation, not only the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How are you working around it today?

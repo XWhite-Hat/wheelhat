@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in WheelHat does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The Activity page in WheelHat usually has the
+        detail that makes a bug fixable.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a wheel with ...
+        2. Add a ... action
+        3. Spin
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: WheelHat version
+      description: Shown at the bottom of the sidebar, or on the Settings page.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How are you running it?
+      options:
+        - WheelHat.exe (release download)
+        - start.bat
+        - pip install / from source
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11"
+    validations:
+      required: true
+  - type: dropdown
+    id: integrations
+    attributes:
+      label: Which connections were involved?
+      multiple: true
+      options:
+        - None / not an integration problem
+        - OBS Studio
+        - VTube Studio
+        - Streamer.bot
+        - Mix It Up
+        - Speaker.bot
+        - SAMMI
+        - VNyan
+        - Twitch
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything from the Activity page or the console
+      render: text

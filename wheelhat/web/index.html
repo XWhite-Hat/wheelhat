@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WheelHat</title>
+    <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    />
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-mark" src="/static/img/logo.svg" alt="" />
+          <div>
+            <div class="brand-name">WheelHat</div>
+            <div class="brand-version" id="version">—</div>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav">
+          <a href="#/wheels" data-route="wheels">Wheels <span class="count" id="navWheelCount"></span></a>
+          <a href="#/connections" data-route="connections">Connections</a>
+          <a href="#/twitch" data-route="twitch">Twitch</a>
+          <a href="#/activity" data-route="activity">Activity</a>
+          <a href="#/settings" data-route="settings">Settings</a>
+        </nav>
+
+        <div class="sidebar-foot" id="statusFoot"></div>
+      </aside>
+
+      <main class="main" id="main"></main>
+    </div>
+
+    <div class="toasts" id="toasts"></div>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

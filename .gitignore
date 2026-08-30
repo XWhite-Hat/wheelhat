@@ -1,0 +1,42 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# WheelHat runtime data (wheels, tokens, overlay assets)
+data/
+
+# Python and build output
+# dist/ holds both `python -m build` artefacts (sdist + wheel)
+# and the PyInstaller executable.
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+dist_*/
+build_*/
+# PyInstaller: the spec is committed, its outputs are not.
+build/__pycache__/
+build/work/
+build/dist/
+build/WheelHat/
+build/WheelHatDebug/
+.pytest_cache/
+.ruff_cache/
+
+# Editors
+.claude/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Packaging
+# PyInstaller writes throwaway specs beside whatever it builds. The one in
+# build/ is hand-written and the release workflow needs it, so keep it.
+*.spec
+!build/wheelhat.spec
+.python-version
+
+# Extra local virtualenvs
+.venv*/

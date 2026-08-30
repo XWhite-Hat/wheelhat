@@ -1,0 +1,44 @@
+name: Integration request
+description: Ask for support for another streaming app
+labels: ["integration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        WheelHat can only control apps that expose a local API. The more of the
+        below you can fill in, the faster this can be judged.
+  - type: input
+    id: app
+    attributes:
+      label: Application
+      placeholder: "Some Streaming Tool"
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: Link to its API documentation
+    validations:
+      required: true
+  - type: input
+    id: port
+    attributes:
+      label: Default local port and protocol
+      placeholder: "ws://127.0.0.1:1234/ or http://localhost:1234/api"
+  - type: dropdown
+    id: enumerable
+    attributes:
+      label: Can its API list the user's own configuration?
+      description: >
+        For example listing scenes, actions or hotkeys. This decides whether
+        WheelHat can offer a dropdown or has to ask you to type a name.
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What would you want a wheel slice to make it do?

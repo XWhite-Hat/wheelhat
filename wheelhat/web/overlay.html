@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WheelHat overlay</title>
+    <link rel="stylesheet" href="/static/css/overlay.css" />
+  </head>
+  <body>
+    <div class="stage" id="stage" data-state="idle">
+      <div class="title" id="title" hidden></div>
+
+      <div class="wheel-wrap" id="wheelWrap">
+        <canvas id="wheel"></canvas>
+      </div>
+
+      <div class="result" id="result" hidden>
+        <div class="result-label">Winner</div>
+        <div class="result-value" id="resultValue"></div>
+      </div>
+
+      <div class="message" id="message" hidden></div>
+
+      <div class="connection" id="connection">Connecting…</div>
+    </div>
+
+    <script type="module" src="/static/js/overlay.js"></script>
+  </body>
+</html>

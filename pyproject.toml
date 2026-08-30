@@ -1,0 +1,100 @@
+[project]
+name = "wheelhat"
+version = "0.1.0"
+description = "Spinner wheels for Twitch streamers, with OBS browser sources, channel point triggers and graphical action wiring."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "WheelHat contributors" }]
+keywords = ["twitch", "streaming", "obs", "vtuber", "overlay", "wheel", "streamer"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Games/Entertainment",
+]
+
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "psutil>=5.9",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+# Qt for Python is LGPL, which keeps WheelHat itself MIT-licensed.
+desktop = ["PySide6>=6.6"]
+# Draws the first-run wizard in the frozen build, before Qt is available.
+bootstrap = ["customtkinter>=5.2"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.16",
+    "build>=1.2",
+    # Only for tools/make_icon.py; deliberately excluded from the frozen build.
+    "Pillow>=10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/OWNER/wheelhat"
+Repository = "https://github.com/OWNER/wheelhat"
+Issues = "https://github.com/OWNER/wheelhat/issues"
+Changelog = "https://github.com/OWNER/wheelhat/blob/main/CHANGELOG.md"
+
+[project.scripts]
+wheelhat = "wheelhat.__main__:main"
+
+[project.gui-scripts]
+# Same entry point, but launched without a console window on Windows.
+wheelhat-desktop = "wheelhat.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wheelhat*"]
+
+[tool.setuptools.package-data]
+wheelhat = ["web/**/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".venv", ".venv310", "data", "dist", "dist_*", "build", "build_*"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "C4", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test fakes deliberately mirror the wire shapes of the apps they stand in for.
+"tests/fakes.py" = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency markers are calls in argument defaults by design.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+]
