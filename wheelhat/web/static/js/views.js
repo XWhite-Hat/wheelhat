@@ -9,10 +9,12 @@ import {
   guard,
   h,
   modal,
+  plural,
   toast,
 } from './core.js';
 import { invalidateOptions } from './fields.js';
 import { refreshSettings, refreshStatus, refreshWheels, store, subscribe } from './store.js';
+import { triggerSpec } from './trigger-schemas.js';
 
 /* ============================================================== wheels list */
 
@@ -76,7 +78,7 @@ function wheelCard(wheel) {
       h(
         'span.pill',
         { class: wheel.overlay_clients ? 'good' : '' },
-        `${wheel.overlay_clients || 0} source${wheel.overlay_clients === 1 ? '' : 's'}`
+        plural(wheel.overlay_clients || 0, 'source')
       )
     ),
     h(
@@ -89,7 +91,10 @@ function wheelCard(wheel) {
       h(
         'button.btn.primary.small',
         {
-          disabled: wheel.spinning,
+          // A wheel with nothing spinnable on it cannot spin; the server says
+          // so with a 409, which is a worse way to find out than a dead button.
+          disabled: wheel.spinning || !wheel.spinnable_count,
+          title: wheel.spinnable_count ? '' : 'Add a slice first',
           onclick: guard(async () => {
             await api.post(`/wheels/${wheel.id}/spin`, { source: 'manual', ignore_cooldown: true });
           }),
@@ -123,7 +128,7 @@ function wheelCard(wheel) {
         'button.btn.small.danger',
         {
           onclick: async () => {
-            if (!(await confirmDialog(`Delete "${wheel.name}"? This cannot be undone.`))) return;
+            if (!(await confirmDialog(`Delete "${wheel.name}"?`, { detail: 'This cannot be undone.' }))) return;
             await api.del(`/wheels/${wheel.id}`);
             await refreshWheels();
             toast('Wheel deleted', 'ok');
@@ -150,7 +155,7 @@ function importWheel() {
       const data = JSON.parse(await file.text());
       const result = await api.post('/import', { data, replace: false });
       await refreshWheels();
-      toast(`Imported ${result.imported} wheel(s)`, 'ok');
+      toast(`Imported ${plural(result.imported, 'wheel')}`, 'ok');
     } catch (err) {
       toast(`Import failed: ${err.message}`, 'bad', 7000);
     } finally {
@@ -163,38 +168,70 @@ function importWheel() {
 
 /* =============================================================== connections */
 
+/**
+ * Connections, ordered by what the user has rather than what we support.
+ *
+ * It used to open with seven configuration forms - one per supported app, all
+ * disabled, for apps most people do not have - and put the scan, which is the
+ * only thing that knows what is actually on the machine, at the bottom. So the
+ * page led with a wall of forms and buried the answer.
+ *
+ * Now: what is running, then what you have connected, then the manual forms
+ * behind a disclosure.
+ */
 export async function renderConnections(main) {
-  const grid = h('div.conn-grid');
   const discoverBox = h('div');
+  const yours = h('div.conn-grid');
+  const yoursSection = h('div', { style: { marginTop: '20px' } });
+  const manual = h('div.conn-grid');
 
   const page = h(
     'div.page',
     h(
       'div.page-head',
-      h(
-        'div',
-        h('h1', 'Connections'),
-        h('p', 'WheelHat talks to OBS and VTube Studio directly, so your actions can pick real scenes and hotkeys from a list instead of you writing requests by hand.')
-      )
+      h('div', h('h1', 'Connections'), h('p', 'Apps on this machine that your wheel actions can control.'))
     ),
-    grid,
     h(
       'div.card',
-      { style: { marginTop: '20px' } },
       h(
         'div.row',
-        h('div.grow', h('h2', 'Find apps on this machine'), h('p.card-hint', { style: { margin: '4px 0 0' } }, 'Checks for the streaming tools WheelHat knows about and tells you which ones are ready to control.')),
-        h('button.btn', { id: 'scanBtn', onclick: guard(runScan) }, 'Scan now')
+        h('div.grow', h('h2', 'Apps on this machine')),
+        h('button.btn', { id: 'scanBtn', onclick: guard(runScan) }, 'Scan again')
       ),
       h('div', { style: { marginTop: '14px' } }, discoverBox)
+    ),
+    yoursSection,
+    h(
+      'details.card',
+      { style: { marginTop: '20px' } },
+      h('summary', 'Set one up by hand'),
+      h(
+        'p.card-hint',
+        'For an app on another machine, or one the scan cannot see because its '
+          + 'server is switched off.'
+      ),
+      manual
     )
   );
 
   clear(main).appendChild(page);
 
   const draw = () => {
-    clear(grid);
-    for (const integration of store.integrations) grid.appendChild(connectionCard(integration));
+    // "Yours" is what has been turned on. Everything else is a blank form, and
+    // blank forms belong behind the disclosure.
+    const connected = store.integrations.filter((integration) => integration.enabled);
+    const rest = store.integrations.filter((integration) => !integration.enabled);
+
+    clear(yours);
+    for (const integration of connected) yours.appendChild(connectionCard(integration));
+
+    clear(yoursSection);
+    if (connected.length) {
+      yoursSection.append(h('h2', { style: { margin: '0 0 12px' } }, 'Your connections'), yours);
+    }
+
+    clear(manual);
+    for (const integration of rest) manual.appendChild(connectionCard(integration));
   };
 
   async function runScan() {
@@ -204,8 +241,27 @@ export async function renderConnections(main) {
     clear(discoverBox).appendChild(h('div.muted', 'Probing local ports…'));
     try {
       const data = await api.get('/discovery');
+      const found = data.results.filter((r) => r.status !== 'not_found');
+      const missing = data.results.filter((r) => r.status === 'not_found');
+
       clear(discoverBox);
-      for (const result of data.results) discoverBox.appendChild(discoveryRow(result));
+      if (!found.length) {
+        // Seven "Not running" rows say the same thing once, badly.
+        discoverBox.appendChild(
+          h('div.muted', 'No supported apps are running. Start OBS or VTube Studio and scan again.')
+        );
+      }
+      for (const result of found) discoverBox.appendChild(discoveryRow(result));
+      if (missing.length) {
+        discoverBox.appendChild(
+          h(
+            'details.fold',
+            { style: { marginTop: '10px' } },
+            h('summary', plural(missing.length, 'app') + ' not running'),
+            ...missing.map(discoveryRow)
+          )
+        );
+      }
     } catch (err) {
       clear(discoverBox).appendChild(h('div.test-result.bad', err.message));
     } finally {
@@ -225,7 +281,7 @@ export async function renderConnections(main) {
 
 const PASSWORD_HINTS = {
   streamer_bot:
-    'Optional. Streamer.bot only needs a password for sending chat messages — everything else works without one.',
+    'Only needed for sending chat messages.',
   obs: 'From Tools > WebSocket Server Settings > Show Connect Info.',
   sammi: 'Only if you set one under SAMMI’s API settings.',
 };
@@ -240,7 +296,7 @@ function stateLabel(integration) {
   const map = {
     connected: ['good', 'Connected'],
     connecting: ['warn', 'Connecting…'],
-    needs_auth: ['warn', 'Needs authorisation'],
+    needs_auth: ['warn', 'Needs approval in VTube Studio'],
     error: ['bad', 'Not connected'],
     disconnected: ['', 'Off'],
   };
@@ -387,7 +443,7 @@ function discoveryRow(result) {
               toast(`${result.name} added to your connections`, 'ok');
             }),
           },
-          'Use it'
+          'Connect'
         )
       : null,
     !result.supported && result.status !== 'not_found'
@@ -441,22 +497,42 @@ export async function renderTwitch(main) {
     clear(body);
     const status = store.twitch || {};
 
+    // A build with no application of its own genuinely needs one first, so
+    // there the card is step 1. A released build has one, and asking a user to
+    // read three sentences about an override they will never want - second
+    // thing on the page - is the wrong order. It goes at the bottom, closed.
     if (!status.client_id_set) {
       body.appendChild(clientIdCard(status));
       return;
     }
+
     if (!status.signed_in) {
       body.appendChild(signInCard(status));
-      // Nothing to configure when the build brings its own application - the
-      // only thing to do is connect. The card comes back for anyone who has
-      // saved their own id, so they can still see and clear it.
-      if (!status.using_bundled_client_id) body.appendChild(clientIdCard(status, true));
-      return;
+    } else {
+      body.appendChild(signedInCard(status));
+      body.appendChild(rewardsCard(status));
+      // Returns null when no wheel has a trigger: there is nothing to test.
+      const test = testCard(status);
+      if (test) body.appendChild(test);
     }
-    body.appendChild(signedInCard(status));
-    body.appendChild(rewardsCard(status));
-    body.appendChild(subscriptionsCard(status));
-    body.appendChild(testCard());
+
+    if (status.using_bundled_client_id) {
+      body.appendChild(
+        h(
+          'details.card',
+          h('summary', 'Use your own Twitch application'),
+          h(
+            'p.card-hint',
+            'WheelHat signs in through its own Twitch application. Paste a Client ID '
+              + 'here only if you would rather use yours; clear it to go back.'
+          ),
+          clientIdCard(status, true, true)
+        )
+      );
+    } else {
+      // They have saved their own, so it stays visible and clearable.
+      body.appendChild(clientIdCard(status, true));
+    }
   };
 
   await refreshStatus();
@@ -466,7 +542,7 @@ export async function renderTwitch(main) {
   });
 }
 
-function clientIdCard(status, collapsed = false) {
+function clientIdCard(status, collapsed = false, bare = false) {
   const input = h('input', { type: 'text', value: status.client_id || '', placeholder: 'your application client id' });
   // A release build ships WheelHat's own application, so registering one is an
   // option rather than a first step. A build from source has nothing bundled
@@ -476,26 +552,22 @@ function clientIdCard(status, collapsed = false) {
     ? 'Use your own Twitch application (optional)'
     : collapsed
       ? 'Twitch application'
-      : 'Step 1 — register a Twitch application';
+      : 'Step 1: register a Twitch application';
   return h(
-    'div.card',
-    h('h2', heading),
-    bundled
+    bare ? 'div' : 'div.card',
+    bare ? null : h('h2', heading),
+    // When bare, the <details> around it already says this.
+    bundled && !bare
       ? h(
           'p.card-hint',
-          'WheelHat is signing in through its own Twitch application, so there is '
-            + 'nothing to register. Paste a Client ID here only if you would rather '
-            + 'use your own; clear it to go back to the built-in one.'
+          'WheelHat signs in through its own Twitch application. Paste a Client ID '
+            + 'here only if you would rather use yours; clear it to go back.'
         )
       : null,
     collapsed || bundled
       ? null
       : h(
           'div',
-          h(
-            'p.card-hint',
-            'WheelHat signs in with your own Twitch app, so your account is never shared with anyone else. It takes about a minute:'
-          ),
           h(
             'ol.muted',
             { style: { marginTop: 0, paddingLeft: '20px', lineHeight: '1.9' } },
@@ -550,7 +622,7 @@ function signInCard(status) {
     // before handing them over - h() filters them, this does not.
     box.append(
       ...[
-        h('p.card-hint', 'WheelHat will show you a short code to enter on twitch.tv. Nothing is typed into this app.'),
+        h('p.card-hint', 'You will enter a short code on twitch.tv to approve WheelHat.'),
         status.flow_error ? h('div.test-result.bad', { style: { marginBottom: '12px' } }, status.flow_error) : null,
         h(
           'button.btn.primary',
@@ -570,9 +642,18 @@ function signInCard(status) {
   // through its own application, so connecting is the whole process.
   const heading = status.using_bundled_client_id
     ? 'Connect your Twitch account'
-    : 'Step 2 — connect your account';
+    : 'Step 2: connect your account';
   return h('div.card', h('h2', heading), box);
 }
+
+//: EventSub is our plumbing. What a streamer wants to know is whether Twitch
+//: events are reaching WheelHat.
+const LISTENING_STATE = {
+  connected: 'Listening for Twitch events',
+  connecting: 'Connecting…',
+  disconnected: 'Not listening',
+  error: 'Not listening',
+};
 
 function signedInCard(status) {
   return h(
@@ -582,10 +663,29 @@ function signedInCard(status) {
       h(
         'div.grow',
         h('h2', `Signed in as ${status.display_name || status.login}`),
-        h('p.card-hint', { style: { margin: '4px 0 0' } }, `EventSub: ${status.eventsub_state}${status.eventsub_error ? ` — ${status.eventsub_error}` : ''}`)
+        h('p.card-hint', { style: { margin: '4px 0 0' } }, LISTENING_STATE[status.eventsub_state] || 'Not listening')
       ),
-      h('span.pill', { class: status.eventsub_state === 'connected' ? 'good' : 'warn' }, h('span.dot', { class: status.eventsub_state }), status.eventsub_state)
+      h(
+        'span.pill',
+        { class: status.eventsub_state === 'connected' ? 'good' : 'warn' },
+        h('span.dot', { class: status.eventsub_state }),
+        status.eventsub_state === 'connected' ? 'listening' : status.eventsub_state
+      )
     ),
+    status.eventsub_error
+      ? h('div.test-result.bad', { style: { marginTop: '12px' } }, status.eventsub_error)
+      : null,
+    // Moved here from the subscriptions card: a failed subscription is the one
+    // actionable thing that card held, and errors belong with the connection.
+    status.subscription_errors?.length
+      ? h(
+          'div',
+          { style: { marginTop: '12px' } },
+          status.subscription_errors.map((error) =>
+            h('div.test-result.bad', { style: { marginTop: '6px' } }, error)
+          )
+        )
+      : null,
     status.missing_scopes?.length
       ? h(
           'div.test-result.bad',
@@ -604,7 +704,7 @@ function signedInCard(status) {
             toast('Re-synced EventSub subscriptions', 'ok');
           }),
         },
-        'Re-sync subscriptions'
+        'Reconnect to Twitch'
       ),
       h(
         'button.btn.small',
@@ -637,7 +737,10 @@ function signedInCard(status) {
         'button.btn.small.danger',
         {
           onclick: async () => {
-            if (!(await confirmDialog('Sign out of Twitch? Triggers will stop firing.', { confirmLabel: 'Sign out' }))) return;
+            if (!(await confirmDialog('Sign out of Twitch?', {
+              confirmLabel: 'Sign out',
+              detail: 'Triggers will stop firing.',
+            }))) return;
             await api.post('/twitch/logout');
             toast('Signed out', 'ok');
           },
@@ -649,34 +752,31 @@ function signedInCard(status) {
 }
 
 /**
- * Create and manage the channel point rewards WheelHat owns.
+ * The rewards WheelHat owns, for tidying up.
  *
- * Two reasons this exists rather than sending people to Twitch: it saves anyone
- * having to go and find a reward id, and a reward created here belongs to
- * WheelHat - which is the only way Twitch will let it close the redemption once
- * the wheel has spun. Rewards made on Twitch itself can trigger a wheel, but
- * their redemptions can never be marked fulfilled from here.
+ * Creating one lives on a wheel's channel point trigger, not here. That is
+ * where the need arises and where the new reward is immediately used, and one
+ * job wants one home: the same form in two places is two implementations that
+ * will drift. What is left here is the list and a way to delete.
  */
 function rewardsCard(status) {
   const list = h('div.muted', 'Loading…');
-  const title = h('input', { type: 'text', placeholder: 'Spin the wheel', maxlength: 45 });
-  const cost = h('input', { type: 'number', min: 1, step: 50, value: 500 });
-  const prompt = h('input', { type: 'text', placeholder: 'Shown to viewers when they redeem' });
-  const cooldown = h('input', { type: 'number', min: 0, step: 5, value: 0 });
 
   const refresh = async () => {
     try {
       const { rewards } = await api.get('/twitch/rewards?manageable=1');
       clear(list);
       if (!rewards.length) {
-        list.appendChild(h('div.muted', 'None yet. Create one below and pick it on a wheel’s trigger.'));
+        list.appendChild(
+          h('div.muted', 'None yet. Add a channel point trigger to a wheel and create one there.')
+        );
         return;
       }
       for (const reward of rewards) {
         list.appendChild(
           h(
             'div.log-row',
-            h('span.what', h('strong', reward.title), ` — ${reward.cost} points`),
+            h('span.what', h('strong', reward.title), ` · ${reward.cost} points`),
             h('span.grow'),
             h(
               'button.btn.small.ghost',
@@ -700,31 +800,21 @@ function rewardsCard(status) {
   };
 
   // Channel points and bits only exist on affiliate and partner channels.
-  // Offering a create form that Twitch will refuse is worse than saying so and
-  // pointing at the thing that does work everywhere.
   if (status && status.has_channel_points === false) {
     return h(
       'div.card',
       h('h2', 'Channel point rewards'),
       h(
         'p.card-hint',
-        'Channel points and bits are only available on affiliate and partner channels, '
-          + 'so there are no rewards to create here yet. Nothing is broken — WheelHat '
-          + 'is connected and working.'
-      ),
-      h(
-        'p.card-hint',
-        'Until then, drive your wheels from chat: add a '
-          + 'Chat command trigger to a wheel, set it to something like !spin, and choose '
-          + 'who is allowed to use it. It works on any channel, and you can restrict it '
-          + 'to subscribers, VIPs or moderators.'
+        'Channel points need affiliate or partner status, so there are no rewards yet. '
+          + 'A chat command trigger spins a wheel on any channel.'
       ),
       h(
         'div.row',
         h(
           'a.btn.ghost',
           { href: 'https://help.twitch.tv/s/article/joining-the-affiliate-program', target: '_blank', rel: 'noreferrer' },
-          'About the Affiliate Programme'
+          'About the Affiliate Program'
         )
       )
     );
@@ -737,111 +827,106 @@ function rewardsCard(status) {
     h('h2', 'Channel point rewards'),
     h(
       'p.card-hint',
-      'Rewards created here belong to WheelHat, so it can mark redemptions fulfilled '
-        + 'once the wheel has spun. A reward you made on Twitch can still trigger a wheel, '
-        + 'but Twitch will not let WheelHat close its redemptions.'
+      'Rewards WheelHat created. Only these can be marked fulfilled after a spin. '
+        + 'Create one on a wheel’s channel point trigger.'
     ),
-    list,
-    h('div', { style: { marginTop: '16px' } }),
-    h(
-      'div.grid.two',
-      h('div.field', h('label', 'Name'), title),
-      h('div.field', h('label', 'Cost in points'), cost),
-      h('div.field', h('label', 'Prompt (optional)'), prompt),
-      h('div.field', h('label', 'Cooldown in seconds (0 = none)'), cooldown)
-    ),
-    h(
-      'div.row',
-      { style: { marginTop: '12px' } },
-      h(
-        'button.btn.primary',
-        {
-          onclick: guard(async () => {
-            if (!title.value.trim()) {
-              toast('Give the reward a name', 'bad');
-              return;
-            }
-            await api.post('/twitch/rewards', {
-              title: title.value.trim(),
-              cost: Number(cost.value) || 1,
-              prompt: prompt.value.trim(),
-              cooldown_seconds: Number(cooldown.value) || 0,
-            });
-            toast('Reward created on your channel', 'ok');
-            title.value = '';
-            prompt.value = '';
-            await refresh();
-          }),
+    list
+  );
+}
+
+/**
+ * Fire a trigger as though the event came from Twitch.
+ *
+ * It used to be hard-wired to a channel point redemption, which on a channel
+ * without affiliate status tests an event that can never happen. It now offers
+ * only the trigger types some wheel actually listens for, so the test matches
+ * the wheels in front of you.
+ */
+function buildTestEvent(kind, who) {
+  const login = who.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'testviewer';
+  const stamp = `test-${Date.now()}`;
+  switch (kind) {
+    case 'chat_command':
+      return {
+        event_type: 'channel.chat.message',
+        event: {
+          message_id: stamp,
+          chatter_user_name: who,
+          chatter_user_login: login,
+          chatter_user_id: '000000',
+          message: { text: '!spin' },
+          badges: [{ set_id: 'broadcaster' }],
         },
-        'Create the reward'
-      )
+      };
+    case 'cheer':
+      return {
+        event_type: 'channel.cheer',
+        event: { user_name: who, user_login: login, user_id: '000000', bits: 100, message: 'test cheer' },
+      };
+    case 'subscription':
+      return {
+        event_type: 'channel.subscribe',
+        event: { user_name: who, user_login: login, user_id: '000000', tier: '1000' },
+      };
+    case 'follow':
+      return {
+        event_type: 'channel.follow',
+        event: { user_name: who, user_login: login, user_id: '000000' },
+      };
+    case 'raid':
+      return {
+        event_type: 'channel.raid',
+        event: {
+          from_broadcaster_user_name: who,
+          from_broadcaster_user_login: login,
+          from_broadcaster_user_id: '000000',
+          viewers: 25,
+        },
+      };
+    default:
+      return {
+        event_type: 'channel.channel_points_custom_reward_redemption.add',
+        event: {
+          id: stamp,
+          user_name: who,
+          user_login: login,
+          user_id: '000000',
+          user_input: '',
+          reward: { id: '', title: 'Spin the wheel', cost: 100 },
+        },
+      };
+  }
+}
+
+function testCard(status) {
+  // Only what some wheel listens for. Testing a trigger nothing uses proves
+  // nothing, and on a channel without channel points it cannot even happen.
+  const configured = new Set();
+  for (const wheel of store.wheels || []) {
+    for (const trigger of wheel.triggers || []) {
+      if (trigger.enabled !== false && trigger.type !== 'manual') configured.add(trigger.type);
+    }
+  }
+  if (status && status.has_channel_points === false) configured.delete('channel_points');
+  if (!configured.size) return null;
+
+  const kinds = [...configured];
+  const kind = h(
+    'select',
+    kinds.map((type) =>
+      h('option', { value: type }, (triggerSpec(type) || {}).label || type)
     )
   );
-}
-
-const SUBSCRIPTION_LABELS = {
-  'channel.channel_points_custom_reward_redemption.add': 'Channel point redemptions',
-  'channel.chat.message': 'Chat messages',
-  'channel.cheer': 'Bits cheered',
-  'channel.subscribe': 'New subscriptions',
-  'channel.subscription.gift': 'Gifted subscriptions',
-  'channel.subscription.message': 'Resubscriptions',
-  'channel.follow': 'New followers',
-  'channel.raid': 'Raids',
-  'stream.online': 'Going live',
-};
-
-function subscriptionsCard(status) {
-  const subs = status.subscriptions || [];
-  const always = subs.filter((sub) => sub.baseline);
-  const fromTriggers = subs.filter((sub) => !sub.baseline);
-  const pill = (sub) => h('span.pill.good', SUBSCRIPTION_LABELS[sub.type] || sub.type);
+  const who = h('input', { type: 'text', value: 'TestViewer' });
 
   return h(
     'div.card',
-    h('h2', 'Event subscriptions'),
+    h('h2', 'Simulate an event'),
+    h('p.card-hint', 'Fires your triggers as though the event came from Twitch.'),
     h(
-      'p.card-hint',
-      'Channel point redemptions are picked up as soon as you sign in, so every '
-        + 'reward on your channel is seen whether or not a wheel is using it yet. '
-        + 'Everything else is added as your wheels need it.'
-    ),
-    always.length
-      ? h('div.field', h('label', 'Always on'), h('div.row.wrap', always.map(pill)))
-      : null,
-    fromTriggers.length
-      ? h(
-          'div.field',
-          { style: { marginTop: '12px' } },
-          h('label', 'Added by your wheels'),
-          h('div.row.wrap', fromTriggers.map(pill))
-        )
-      : null,
-    !subs.length ? h('p.muted', 'Nothing subscribed yet.') : null,
-    status.subscription_errors?.length
-      ? h(
-          'div',
-          { style: { marginTop: '12px' } },
-          status.subscription_errors.map((error) => h('div.test-result.bad', { style: { marginTop: '6px' } }, error))
-        )
-      : null
-  );
-}
-
-function testCard() {
-  const rewardTitle = h('input', { type: 'text', value: 'Spin the wheel', placeholder: 'Reward title' });
-  const rewardId = h('input', { type: 'text', placeholder: 'Reward id (optional, matches first)' });
-  const user = h('input', { type: 'text', value: 'TestViewer' });
-
-  return h(
-    'div.card',
-    h('h2', 'Test a trigger without going live'),
-    h('p.card-hint', 'Sends a fake redemption through the same path a real one takes, so you can check your wheel fires and your actions run.'),
-    h(
-      'div.grid.three',
-      h('div.field', h('label', 'Reward title'), rewardTitle),
-      h('div.field', h('label', 'Reward id'), rewardId),
-      h('div.field', h('label', 'Viewer name'), user)
+      'div.grid.two',
+      h('div.field', h('label', 'Event'), kind),
+      h('div.field', h('label', 'Viewer name'), who)
     ),
     h(
       'div.row',
@@ -850,21 +935,11 @@ function testCard() {
         'button.btn.primary',
         {
           onclick: guard(async () => {
-            await api.post('/twitch/simulate', {
-              event_type: 'channel.channel_points_custom_reward_redemption.add',
-              event: {
-                id: `test-${Date.now()}`,
-                user_name: user.value,
-                user_login: user.value.toLowerCase(),
-                user_id: '000000',
-                user_input: '',
-                reward: { id: rewardId.value, title: rewardTitle.value, cost: 100 },
-              },
-            });
-            toast('Simulated redemption sent', 'ok');
+            await api.post('/twitch/simulate', buildTestEvent(kind.value, who.value || 'TestViewer'));
+            toast('Event sent', 'ok');
           }),
         },
-        'Simulate a redemption'
+        'Send it'
       )
     )
   );
@@ -878,7 +953,7 @@ export async function renderActivity(main) {
 
   const page = h(
     'div.page',
-    h('div.page-head', h('div', h('h1', 'Activity'), h('p', 'Live view of what WheelHat is doing. Handy for checking a webhook actually fired.'))),
+    h('div.page-head', h('div', h('h1', 'Activity'), h('p', 'What WheelHat is doing right now.'))),
     h('div.card', h('h2', 'Events'), h('p.card-hint', 'Spins, triggers and skipped triggers.'), feed),
     h(
       'div.card',
@@ -910,7 +985,7 @@ export async function renderActivity(main) {
           'div.log-row',
           { class: entry.ok ? '' : 'bad' },
           h('span.when', clockTime(entry.created_at)),
-          h('span.what', h('strong', entry.name || entry.action_type), ' — ', entry.detail)
+          h('span.what', h('strong', entry.name || entry.action_type), ': ', entry.detail)
         )
       );
     }
@@ -941,7 +1016,7 @@ export async function renderSettings(main) {
       h(
         'p.help',
         { style: { marginTop: '8px' } },
-        'Off by default. When on, a wheel slice can launch a program on this machine — only enable it if you are comfortable with that.'
+        'Lets a wheel slice launch programs on this machine.'
       ),
       h(
         'div.row',
@@ -962,7 +1037,7 @@ export async function renderSettings(main) {
     h(
       'div.card',
       h('h2', 'Backup'),
-      h('p.card-hint', 'Everything lives in a single SQLite file. Export gives you a portable JSON copy of all your wheels.'),
+      h('p.card-hint', 'Exports every wheel as a JSON file you can import again.'),
       h(
         'div.row.wrap',
         h(
@@ -989,7 +1064,7 @@ export async function renderSettings(main) {
           'div',
           h('div.faint', 'Overlay assets'),
           h('div.mono', store.paths.assets_dir || ''),
-          h('div.help', 'Drop sound files here and reference them as /assets/yourfile.mp3 in an overlay sound action.')
+          h('div.help', 'Files here are served as /assets/<name>.')
         ),
         h('div', h('div.faint', 'Server'), h('div.mono', `${store.server.host}:${store.server.port} · WheelHat ${store.server.version}`))
       )

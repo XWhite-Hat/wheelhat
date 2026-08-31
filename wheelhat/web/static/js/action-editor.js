@@ -1,6 +1,7 @@
 /** Reusable editor for a list of actions (used by slices and by wheel-level chains). */
 
 import { api, clear, confirmDialog, copyText, h, modal, uid } from './core.js';
+import { store } from './store.js';
 import { renderFields, variableBar } from './fields.js';
 
 let schemaCache = null;
@@ -28,10 +29,72 @@ function summarise(action, spec) {
   return spec.description?.slice(0, 70) || '';
 }
 
-function pickActionType(schemas, onPick) {
+/**
+ * Which action types can actually do something right now, and why not.
+ *
+ * Every action already declares what it needs. Offering an OBS action to
+ * someone with no OBS connection makes the app look full of things that fail:
+ * the failure only appears when they expand the action or run it. Hiding them
+ * silently would make it look feature-poor instead, so whatever is hidden is
+ * named underneath with the way to get it back.
+ */
+function availability(schemas, context = {}) {
+  const connected = new Set(
+    (store.integrations || [])
+      .filter((integration) => integration.state === 'connected')
+      .map((integration) => integration.kind)
+  );
+  const signedIn = Boolean(store.twitch?.signed_in);
+  const shellAllowed = Boolean(store.settings?.allow_shell_actions);
+  const hasRedeemTrigger = (context.triggers || []).some(
+    (trigger) => trigger.enabled !== false && trigger.type === 'channel_points'
+  );
+
+  const reasons = new Map();
+  const usable = (type) => {
+    if (type.type === 'shell_command') {
+      if (!shellAllowed) {
+        reasons.set('shell', 'Run a program is switched off in Settings.');
+        return false;
+      }
+      return true;
+    }
+    // A refund needs a redemption to refund, which only a channel point
+    // trigger on this wheel can produce.
+    if (type.type === 'twitch_refund' && !hasRedeemTrigger) {
+      reasons.set('refund', 'Refunding needs a channel point trigger on this wheel.');
+      return false;
+    }
+    if (type.requires === 'twitch') {
+      if (!signedIn) {
+        reasons.set('twitch', 'Twitch is not connected.');
+        return false;
+      }
+      return true;
+    }
+    if (type.requires && !connected.has(type.requires)) {
+      reasons.set(type.requires, type.group);
+      return false;
+    }
+    return true;
+  };
+
+  const types = schemas.types.filter(usable);
+  const missingApps = [...reasons]
+    .filter(([key]) => !['shell', 'twitch', 'refund'].includes(key))
+    .map(([, group]) => group);
+  return {
+    types,
+    missingApps: [...new Set(missingApps)],
+    notes: ['twitch', 'shell', 'refund'].filter((k) => reasons.has(k)).map((k) => reasons.get(k)),
+  };
+}
+
+function pickActionType(schemas, onPick, context = {}) {
   const body = h('div');
+  const { types: allowed, missingApps, notes } = availability(schemas, context);
   for (const group of schemas.groups) {
-    const types = schemas.types.filter((t) => t.group === group);
+    const types = allowed.filter((t) => t.group === group);
     if (!types.length) continue;
     body.appendChild(
       h(
@@ -57,6 +120,20 @@ function pickActionType(schemas, onPick) {
       )
     );
   }
+  // Naming what is missing is what keeps this from reading as a small app.
+  if (missingApps.length || notes.length) {
+    const parts = [];
+    if (missingApps.length) {
+      parts.push(
+        h('span', `Not shown: ${missingApps.join(', ')}. `),
+        h('a', { href: '#/connections', onclick: () => dialog.close() }, 'Set them up on Connections'),
+        h('span', '. ')
+      );
+    }
+    for (const note of notes) parts.push(h('span', `${note} `));
+    body.appendChild(h('div.help', { style: { marginTop: '14px' } }, ...parts));
+  }
+
   const dialog = modal({ title: 'Add an action', body, hideConfirm: true, wide: true });
 }
 
@@ -68,7 +145,7 @@ function pickActionType(schemas, onPick) {
  * @param {Function} options.onChange
  * @param {string} options.emptyHint
  */
-export function renderActionList({ actions, schemas, wheelId, onChange, emptyHint }) {
+export function renderActionList({ actions, schemas, wheelId, onChange, emptyHint, context = {} }) {
   const list = h('div.action-list');
   const expanded = new Set();
 
@@ -157,7 +234,7 @@ export function renderActionList({ actions, schemas, wheelId, onChange, emptyHin
               expanded.add(action.id);
               onChange();
               redraw();
-            }),
+            }, context),
         },
         '+ Add action'
       )

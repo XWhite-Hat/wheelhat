@@ -44,6 +44,8 @@ const EMPTY_LAYER = { url: '', enabled: true, scale: 1, offset_x: 0, offset_y: 0
 const DEFAULT_APPEARANCE = {
   palette: DEFAULT_PALETTE,
   text_color: '#ffffff',
+  label_color: '',
+  frame_fills_source: false,
   rim_color: '#111318',
   rim_width: 10,
   pointer_color: '#ffffff',
@@ -101,6 +103,8 @@ function layerActive(layer) {
 export function frameHeadroom(appearance = {}) {
   const frame = appearance.frame_image;
   if (!layerActive(frame)) return { scale: 1, offset: 0 };
+  // A frame fitted to the source has its own room and does not push the wheel.
+  if (appearance.frame_fills_source === true) return { scale: 1, offset: 0 };
   return {
     scale: Math.max(1, Number(frame.scale) || 1),
     offset: Math.max(Math.abs(frame.offset_x || 0), Math.abs(frame.offset_y || 0)),
@@ -277,12 +281,20 @@ export class WheelRenderer {
   }
 
   resize() {
+    // The canvas takes the whole element, which need not be square. The wheel
+    // is still drawn as a circle in the middle of it - the extra area is what
+    // lets a background or a frame cover the whole browser source instead of
+    // being cropped to the square the wheel occupies.
     const rect = this.canvas.getBoundingClientRect();
-    const size = Math.max(1, Math.min(rect.width, rect.height));
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height || rect.width);
     this._dpr = window.devicePixelRatio || 1;
-    this.canvas.width = Math.round(size * this._dpr);
-    this.canvas.height = Math.round(size * this._dpr);
-    this.size = size;
+    this.canvas.width = Math.round(width * this._dpr);
+    this.canvas.height = Math.round(height * this._dpr);
+    this.width = width;
+    this.height = height;
+    //: The wheel's own diameter, which is what everything is scaled against.
+    this.size = Math.min(width, height);
     this.draw();
   }
 
@@ -317,7 +329,11 @@ export class WheelRenderer {
     if (!this._resizing) {
       const rect = this.canvas.getBoundingClientRect();
       const measured = Math.min(rect.width, rect.height);
-      if (measured > 0 && Math.abs(measured - (this.size || 0)) > 0.5) {
+      const changed =
+        Math.abs(measured - (this.size || 0)) > 0.5 ||
+        Math.abs(rect.width - (this.width || 0)) > 0.5 ||
+        Math.abs(rect.height - (this.height || 0)) > 0.5;
+      if (measured > 0 && changed) {
         this._resizing = true;
         try {
           this.resize();
@@ -329,7 +345,10 @@ export class WheelRenderer {
     }
 
     const ctx = this.ctx;
-    const size = this.canvas.width;
+    const canvasWidth = this.canvas.width;
+    const canvasHeight = this.canvas.height;
+    // The wheel is sized by the smaller dimension; the canvas may be wider.
+    const size = Math.min(canvasWidth, canvasHeight);
     if (!size) return;
     // Scale decorations with the wheel, not with the display density. Using the
     // device pixel ratio alone pinned text to a fixed CSS size however big the
@@ -341,21 +360,21 @@ export class WheelRenderer {
     // frame is drawn to the canvas edge and its outer edges are simply cropped,
     // because the canvas only ever had a few pixels of slack around the rim.
     const radius = wheelRadius(size, look, scale);
-    const cx = size / 2;
-    const cy = size / 2;
+    const cx = canvasWidth / 2;
+    const cy = canvasHeight / 2;
 
     // The element can be measured at zero width before layout settles.
     if (radius <= 4) return;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, size, size);
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
     // 1. Background image, behind everything, covering the whole source.
-    this._drawBackground(ctx, size);
+    this._drawBackground(ctx, canvasWidth, canvasHeight);
 
     if (!this.slices.length) {
       this._drawEmpty(ctx, cx, cy, radius, scale);
-      this._drawFrame(ctx, cx, cy, radius, scale);
+      this._drawFrame(ctx, cx, cy, radius, scale, canvasWidth, canvasHeight);
       return;
     }
 
@@ -376,7 +395,7 @@ export class WheelRenderer {
     // 5-8. Everything from here stays put while the wheel turns.
     this._drawRim(ctx, cx, cy, radius, scale);
     this._drawHub(ctx, cx, cy, radius, scale);
-    this._drawFrame(ctx, cx, cy, radius, scale);
+    this._drawFrame(ctx, cx, cy, radius, scale, canvasWidth, canvasHeight);
     this._drawPointer(ctx, cx, cy, radius, scale);
   }
 
@@ -407,14 +426,14 @@ export class WheelRenderer {
     return true;
   }
 
-  _drawBackground(ctx, size) {
+  _drawBackground(ctx, width, height) {
     this._drawLayer(ctx, this.appearance.background_image, {
-      x: size / 2,
-      y: size / 2,
-      boxWidth: size,
-      boxHeight: size,
+      x: width / 2,
+      y: height / 2,
+      boxWidth: width,
+      boxHeight: height,
       mode: 'cover',
-      radius: size / 2,
+      radius: Math.min(width, height) / 2,
     });
   }
 
@@ -553,7 +572,9 @@ export class WheelRenderer {
     const arcHeight = entry.span * radius;
     const base = look.font_size * scale;
     let fontSize = Math.max(9 * scale, Math.min(base, arcHeight * 0.62));
-    const color = entry.slice.text_color || contrastColor(this.colorFor(entry.slice, index));
+    // Slice first, then the wheel's own setting, then automatic contrast.
+    const color =
+      entry.slice.text_color || look.label_color || contrastColor(this.colorFor(entry.slice, index));
 
     ctx.save();
     const applyFont = () => {
@@ -727,16 +748,21 @@ export class WheelRenderer {
   }
 
   /** A static overlay drawn on top of the spinning wheel - frames, glass, glow. */
-  _drawFrame(ctx, cx, cy, radius, scale) {
-    const rim = (this.appearance.rim_width || 0) * scale;
+  _drawFrame(ctx, cx, cy, radius, scale, canvasWidth, canvasHeight) {
+    const look = this.appearance;
+    // Fitted to the wheel by default. Fitted to the whole source when asked,
+    // which is what a wide overlay needs: sized to the wheel it can only ever
+    // occupy the square the wheel sits in, and anything wider is cropped.
+    const fills = look.frame_fills_source === true;
+    const rim = (look.rim_width || 0) * scale;
     const span = (radius + rim) * 2;
-    this._drawLayer(ctx, this.appearance.frame_image, {
-      x: cx,
-      y: cy,
-      boxWidth: span,
-      boxHeight: span,
+    this._drawLayer(ctx, look.frame_image, {
+      x: fills ? canvasWidth / 2 : cx,
+      y: fills ? canvasHeight / 2 : cy,
+      boxWidth: fills ? canvasWidth : span,
+      boxHeight: fills ? canvasHeight : span,
       mode: 'contain',
-      radius,
+      radius: fills ? Math.min(canvasWidth, canvasHeight) / 2 : radius,
     });
   }
 

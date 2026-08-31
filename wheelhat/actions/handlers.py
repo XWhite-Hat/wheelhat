@@ -137,8 +137,7 @@ PASS_VARIABLES_FIELD = Field(
     label="Send the wheel result as arguments",
     type="bool",
     default=True,
-    help="Adds winner, wheel, user, reward and friends as arguments, so you can use "
-    "%winner% and %user% inside Streamer.bot.",
+    help="Available inside Streamer.bot as %winner%, %user% and so on.",
 )
 
 TOGGLE_STATES = [
@@ -189,7 +188,8 @@ TOGGLE_STATES = [
             rows=8,
             default='{\n  "winner": "{{winner|json}}",\n  "wheel": "{{wheel|json}}",\n  "user": "{{user|json}}"\n}',
             when={"field": "body_type", "not_equals": ["none"]},
-            help="Use {{winner}}, {{user}} and friends. Add |json inside a JSON string to escape quotes.",
+            # The variable bar under the field already lists the variables.
+            help="Add |json inside a JSON string to escape quotes.",
         ),
         Field(key="headers", label="Headers", type="keyvalue"),
         Field(key="timeout", label="Timeout (seconds)", type="number", default=10, minimum=1, maximum=120),
@@ -382,7 +382,7 @@ async def obs_source_visibility(config: dict[str, Any], ctx: ExecContext) -> str
     "obs_filter",
     "Toggle a filter",
     "OBS Studio",
-    description="Enable or disable a filter on a source - handy for shaders, chroma key and audio effects.",
+    description="Enable or disable a filter on a source.",
     icon="sliders",
     requires="obs",
     fields=[
@@ -448,7 +448,7 @@ async def obs_text(config: dict[str, Any], ctx: ExecContext) -> str:
     "obs_media",
     "Control a media source",
     "OBS Studio",
-    description="Play, pause, restart or stop a media source - the easy way to fire a sound effect.",
+    description="Play, pause, restart or stop a media source.",
     icon="play",
     requires="obs",
     fields=[
@@ -581,7 +581,7 @@ async def obs_control(config: dict[str, Any], ctx: ExecContext) -> str:
     "obs_raw",
     "Raw OBS request",
     "OBS Studio",
-    description="Escape hatch for anything obs-websocket supports that has no dedicated action here.",
+    description="Any obs-websocket request, for things with no dedicated action.",
     icon="terminal",
     requires="obs",
     fields=[
@@ -607,7 +607,7 @@ async def obs_raw(config: dict[str, Any], ctx: ExecContext) -> str:
     "vts_hotkey",
     "Trigger a hotkey",
     "VTube Studio",
-    description="The usual way to swap outfits, toggle accessories or fire an animation.",
+    description="Trigger a VTube Studio hotkey: outfits, accessories, animations.",
     icon="sparkles",
     requires="vtube_studio",
     fields=[
@@ -688,7 +688,7 @@ async def vts_expression(config: dict[str, Any], ctx: ExecContext) -> str:
     "vts_move",
     "Move the model",
     "VTube Studio",
-    description="Nudge, rotate or resize the avatar - good for 'tiny mode' style punishments.",
+    description="Nudge, rotate or resize the avatar.",
     icon="move",
     requires="vtube_studio",
     fields=[
@@ -755,8 +755,7 @@ def _sb_args(config: dict[str, Any], ctx: ExecContext) -> dict[str, Any]:
     "Run an action",
     "Streamer.bot",
     description=(
-        "Run one of your Streamer.bot actions. Everything Streamer.bot can do - YouTube, Kick, StreamElements, sound "
-        "files, C# code - becomes available to a wheel slice."
+        "Run one of your Streamer.bot actions."
     ),
     icon="robot",
     requires="streamer_bot",
@@ -768,7 +767,7 @@ def _sb_args(config: dict[str, Any], ctx: ExecContext) -> dict[str, Any]:
             type="select",
             source="sb.actions",
             required=True,
-            help="Picked by id, so renaming the action in Streamer.bot will not break this.",
+            help="Matched by id, so renaming it in Streamer.bot is safe.",
         ),
         Field(
             key="args",
@@ -823,8 +822,7 @@ async def streamerbot_code_trigger(config: dict[str, Any], ctx: ExecContext) -> 
     "Send a chat message",
     "Streamer.bot",
     description=(
-        "Send chat through Streamer.bot - the easy way to post to YouTube, Kick or Trovo, which WheelHat does not "
-        "talk to directly."
+        "Send chat through Streamer.bot to YouTube, Kick or Trovo."
     ),
     icon="message",
     requires="streamer_bot",
@@ -1069,7 +1067,7 @@ async def delay(config: dict[str, Any], ctx: ExecContext) -> str:
     "shell_command",
     "Run a program",
     "System",
-    description="Launch a local program or script. Disabled until you enable shell actions in Settings.",
+    description="Launch a local program or script.",
     icon="terminal",
     fields=[
         Field(key="command", label="Command", required=True, placeholder="C:\\tools\\confetti.exe"),
@@ -1127,7 +1125,7 @@ async def shell_command(config: dict[str, Any], ctx: ExecContext) -> str:
     "mixitup_command",
     "Run a command",
     "Mix It Up",
-    description="Run one of your Mix It Up commands, picked from a live list of the ones you have set up.",
+    description="Run one of your Mix It Up commands.",
     icon="robot",
     requires="mix_it_up",
     fields=[
@@ -1192,8 +1190,7 @@ async def mixitup_command(config: dict[str, Any], ctx: ExecContext) -> str:
             label="Voice alias",
             placeholder="Brian",
             help=(
-                "The alias as named in Speaker.bot. Its API cannot list them, so this is typed. Leave blank for the "
-                "default voice."
+                "The alias as named in Speaker.bot. Blank uses the default voice."
             ),
         ),
         Field(key="bad_word_filter", label="Apply the bad word filter", type="bool", default=True),
@@ -1262,7 +1259,7 @@ async def speakerbot_control(config: dict[str, Any], ctx: ExecContext) -> str:
             label="Button ID",
             required=True,
             placeholder="ID19",
-            help="SAMMI has no way to list its buttons, so this is typed. Copy the ID from the button in SAMMI.",
+            help="Copy the ID from the button in SAMMI.",
         ),
         Field(
             key="release",
@@ -1333,7 +1330,7 @@ async def sammi_variable(config: dict[str, Any], ctx: ExecContext) -> str:
             label="Trigger name",
             required=True,
             placeholder="cursed_outfit",
-            help="Must match the Websocket Command on a trigger in VNyan. VNyan cannot list them, so this is typed.",
+            help="Must match the Websocket Command on a VNyan trigger.",
         ),
     ],
 )

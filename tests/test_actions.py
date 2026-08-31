@@ -118,3 +118,39 @@ async def test_chain_skips_disabled_actions():
 async def test_shell_action_is_refused_until_enabled():
     with pytest.raises(ActionFailed, match="Shell actions are disabled"):
         await execute_single({"type": "shell_command", "config": {"command": "cmd"}}, ctx())
+
+
+# The action picker hides a group when the app it needs is not connected. That
+# gate reads `requires`, so an action that forgets to declare it would be
+# offered on a machine that cannot run it - the exact failure the gate removes.
+GROUP_REQUIREMENTS = {
+    "OBS Studio": "obs",
+    "VTube Studio": "vtube_studio",
+    "Streamer.bot": "streamer_bot",
+    "Mix It Up": "mix_it_up",
+    "Speaker.bot": "speaker_bot",
+    "SAMMI": "sammi",
+    "VNyan": "vnyan",
+    "Twitch": "twitch",
+}
+
+
+def test_every_action_declares_the_app_it_needs():
+    from wheelhat.actions.schema import schema_payload as schemas
+
+    wrong = []
+    for spec in schemas()["types"]:
+        expected = GROUP_REQUIREMENTS.get(spec.get("group", ""))
+        if expected and spec.get("requires") != expected:
+            wrong.append(f"{spec['type']} (group {spec['group']}) declares {spec.get('requires')!r}")
+    assert not wrong, "these would be offered while their app is disconnected: " + "; ".join(wrong)
+
+
+def test_actions_that_need_nothing_stay_available():
+    """The picker must never be empty on a fresh install, or it reads as broken."""
+    from wheelhat.actions.schema import schema_payload as schemas
+
+    always = [s for s in schemas()["types"] if not s.get("requires") and s["type"] != "shell_command"]
+    assert always, "at least one action must work with nothing connected"
+    groups = {s["group"] for s in always}
+    assert "Web" in groups, "sending a webhook needs no local app and must always be offered"

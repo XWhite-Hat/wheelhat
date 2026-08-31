@@ -497,13 +497,13 @@ function buildLiveSelect(field, values, change, extraParams, wrapper, control, s
         setManual(true);
         return;
       }
-      select.appendChild(h('option', { value: values[field.key] ?? '' }, values[field.key] || '—'));
+      select.appendChild(h('option', { value: values[field.key] ?? '' }, values[field.key] || '(none)'));
       return;
     }
 
     const options = result.options || [];
     const hasBlank = options.some((option) => option.value === '');
-    if (!hasBlank) select.appendChild(h('option', { value: '' }, '— choose —'));
+    if (!hasBlank) select.appendChild(h('option', { value: '' }, 'Choose…'));
 
     const groups = new Map();
     for (const option of options) {

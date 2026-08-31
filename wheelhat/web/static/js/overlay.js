@@ -7,6 +7,9 @@
 
 import { RESULT_BAND, shadowFilter, TITLE_BAND, WheelRenderer } from './wheel-canvas.js';
 
+//: Matches the `gap` on .stage in overlay.css.
+const STAGE_GAP = 14;
+
 const wheelId = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
 const params = new URLSearchParams(location.search);
 
@@ -30,7 +33,7 @@ let retryDelay = 800;
 
 /* --------------------------------------------------------------------- layout */
 
-let lastSize = 0;
+let lastSize = '';
 let layoutRetry = null;
 let layoutAttempts = 0;
 
@@ -69,17 +72,30 @@ function layout() {
   // moment a winner appeared and grew back when it faded - the wheel visibly
   // resizing on every spin. Reserved up front, the wheel is one fixed size.
   const showTitle = appearance.show_title !== false && params.get('title') !== '0';
-  const chrome = (showTitle ? TITLE_BAND : 0) + (resultIsUnder() ? RESULT_BAND : 0);
+  const under = resultIsUnder();
+  // The stage puts STAGE_GAP between its children, so the bands alone do not
+  // account for the height. Without this the canvas is given more room than
+  // exists and the column reflows.
+  const gaps = STAGE_GAP * ((showTitle ? 1 : 0) + (under ? 1 : 0));
+  const chrome = (showTitle ? TITLE_BAND : 0) + (under ? RESULT_BAND : 0) + gaps;
 
   // Only the height is spent on chrome, so a tall narrow source still gets a
   // wheel as wide as it will go.
   const fits = Math.min(width, height - chrome);
   const size = Math.max(120, configured > 0 ? Math.min(configured, fits) : fits);
-  if (size === lastSize) return;
+
+  // The wheel is `size` across, but the canvas is given the whole area left
+  // after the title and banner. The wheel is drawn centred in it, and the extra
+  // room is what lets a background or a frame cover the whole browser source
+  // rather than being cropped to the square the wheel occupies.
+  const boxWidth = Math.max(size, width);
+  const boxHeight = Math.max(size, height - chrome);
+  const signature = `${size}:${boxWidth}:${boxHeight}`;
+  if (signature === lastSize) return;
   layoutAttempts = 0;
-  lastSize = size;
-  wrap.style.width = `${size}px`;
-  wrap.style.height = `${size}px`;
+  lastSize = signature;
+  wrap.style.width = `${boxWidth}px`;
+  wrap.style.height = `${boxHeight}px`;
   // Sized here too: the shadow scales with the wheel, so it has to be
   // recomputed whenever the source is resized.
   wrap.style.filter = shadowFilter(appearance, size);
@@ -114,7 +130,7 @@ function applyState(state) {
   layout();
   // layout() returns early when the size has not changed, so the filter is
   // applied here as well - editing the shadow does not resize anything.
-  wrap.style.filter = shadowFilter(appearance, lastSize || 0);
+  wrap.style.filter = shadowFilter(appearance, Number(String(lastSize).split(':')[0]) || 0);
   scheduleIdleHide();
 }
 

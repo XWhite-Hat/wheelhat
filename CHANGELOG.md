@@ -68,6 +68,14 @@ First release.
   on a channel point trigger and WheelHat fills in the next reward redeemed.
   The listen is armed by hand, takes one reward, keeps nothing about the viewer,
   and expires on its own.
+- An overlay image can be fitted to the whole browser source instead of to the
+  wheel. The canvas now spans the source rather than the square the wheel sits
+  in, so wide artwork is no longer cropped on import.
+- Wedge labels have a wheel-wide colour, with Auto for per-wedge contrast. The
+  Look tab's colour control was labelled "Default text" but only ever coloured
+  the hub label; it is now named for what it does.
+- The editor preview takes the shape of the configured browser source, so
+  cropping is visible before it reaches OBS.
 - The wheel's drop shadow is configurable per wheel - softness, offset, colour,
   opacity, or off - and scales with the wheel. The defaults reproduce the
   previous fixed shadow exactly.

@@ -743,3 +743,120 @@ async def test_manageable_rewards_are_a_separate_option_source(client, monkeypat
     assert len(ours.json()["options"]) == 1
     assert ours.json()["options"][0]["value"] == "r-1"
     assert asked == [False, True], "the manageable list must ask Twitch for only ours"
+
+
+async def test_label_colour_defaults_to_automatic_contrast(client):
+    """The Look tab's colour used to be labelled "Default text" but only ever
+    coloured the hub. label_color is the wheel-wide label colour, and it starts
+    empty so existing wheels keep their per-wedge contrast."""
+    made = (await client.post("/api/wheels", json={})).json()
+    assert made["appearance"]["label_color"] == ""
+    assert made["appearance"]["text_color"] == "#ffffff", "the hub label keeps its own colour"
+
+    made["appearance"]["label_color"] = "#101010"
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+    assert saved["appearance"]["label_color"] == "#101010"
+
+    from wheelhat.engine import render_payload
+
+    assert render_payload(db.get_wheel(made["id"]))["appearance"]["label_color"] == "#101010"
+
+
+async def test_a_frame_can_be_fitted_to_the_whole_source(client):
+    """A frame fitted to the wheel is confined to the square the wheel sits in,
+    so a 16:9 overlay was cropped on import."""
+    made = (await client.post("/api/wheels", json={})).json()
+    assert made["appearance"]["frame_fills_source"] is False
+
+    made["appearance"]["frame_fills_source"] = True
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+    assert saved["appearance"]["frame_fills_source"] is True
+
+    from wheelhat.engine import render_payload
+
+    overlay = render_payload(db.get_wheel(made["id"]))["appearance"]
+    assert overlay["frame_fills_source"] is True, "the overlay needs it to place the frame"
+
+
+def test_no_em_dashes_in_the_interface():
+    """They were being used as a general-purpose separator, mostly where a
+    colon or a full stop reads better, and they are noisy at small sizes."""
+    web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web"
+    offenders = []
+    for path in list(web.glob("*.html")) + list((web / "static" / "js").glob("*.js")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "—" in line:
+                offenders.append(f"{path.name}:{number}")
+    assert not offenders, f"em dashes in user-facing text: {offenders}"
+
+
+def test_the_simulator_covers_every_trigger_type_a_wheel_can_use():
+    """The test card offers whichever trigger types your wheels use, so every
+    one of them has to survive normalise() - it used to only ever send a
+    channel point redemption, which a non-affiliate channel cannot produce."""
+    from wheelhat.triggers import normalise
+
+    samples = {
+        "channel_points": (
+            "channel.channel_points_custom_reward_redemption.add",
+            {"id": "t", "user_name": "V", "reward": {"id": "", "title": "Spin", "cost": 100}},
+        ),
+        "chat_command": (
+            "channel.chat.message",
+            {"chatter_user_name": "V", "message": {"text": "!spin"}, "badges": []},
+        ),
+        "cheer": ("channel.cheer", {"user_name": "V", "bits": 100}),
+        "subscription": ("channel.subscribe", {"user_name": "V", "tier": "1000"}),
+        "follow": ("channel.follow", {"user_name": "V"}),
+        "raid": ("channel.raid", {"from_broadcaster_user_name": "V", "viewers": 25}),
+    }
+    for expected, (event_type, event) in samples.items():
+        data = normalise(event_type, event)
+        assert data is not None, f"{event_type} did not normalise"
+        assert data["trigger_type"] == expected
+        assert data["user"] == "V", f"{expected} lost the viewer name"
+
+
+async def test_a_wheel_summary_says_whether_it_can_spin(client):
+    """The Wheels page disables Spin on a wheel with nothing to land on, rather
+    than letting the server refuse it with a 409 after the click."""
+    made = (await client.post("/api/wheels", json={})).json()
+    listed = (await client.get("/api/wheels")).json()["wheels"]
+    summary = next(w for w in listed if w["id"] == made["id"])
+    assert summary["spinnable_count"] > 0
+
+    for slice_ in made["slices"]:
+        slice_["enabled"] = False
+    await client.put(f"/api/wheels/{made['id']}", json=made)
+
+    listed = (await client.get("/api/wheels")).json()["wheels"]
+    summary = next(w for w in listed if w["id"] == made["id"])
+    assert summary["spinnable_count"] == 0, "with every slice off there is nothing to spin"
+
+    # And the server agrees, which is what the button is saving the user from.
+    refused = await client.post(f"/api/wheels/{made['id']}/spin", json={"source": "manual"})
+    assert refused.status_code == 409
+
+
+def test_no_hand_rolled_plurals_in_the_interface():
+    """core.js has plural(); three places wrote "(s)" instead and one did it
+    properly, which is three ways of saying the same thing."""
+    js = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static" / "js"
+    offenders = []
+    for path in sorted(js.glob("*.js")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\(s\)`|\(s\)'|\(s\)\"", line):
+                offenders.append(f"{path.name}:{number}")
+    assert not offenders, f"use plural() instead: {offenders}"
+
+
+def test_the_seed_wheel_description_is_not_a_tutorial():
+    """It renders on the wheel card for as long as the wheel exists."""
+    from wheelhat.seed import ensure_starter_wheel
+
+    ensure_starter_wheel()
+    wheel = next(w for w in db.list_wheels() if w.name == "Punishment Wheel")
+    description = wheel.description
+    assert len(description) < 90, f"too long for a card subtitle: {description!r}"
+    for imperative in ("open one", "then enable", "point it at"):
+        assert imperative not in description.lower(), "instructions belong in the UI, not in data"

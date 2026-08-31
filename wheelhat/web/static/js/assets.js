@@ -138,9 +138,9 @@ export function pickAsset({ kind = 'image', current = '' } = {}) {
               title: 'Delete this file',
               onclick: async (event) => {
                 event.stopPropagation();
-                if (!(await confirmDialog(
-                  `Delete "${asset.name}"? Any wheel using it will show nothing.`
-                ))) return;
+                if (!(await confirmDialog(`Delete "${asset.name}"?`, {
+                  detail: 'Any wheel using it will show nothing.',
+                }))) return;
                 await api.del(`/assets/${encodeURIComponent(asset.name)}`);
                 forgetImage(asset.url);
                 invalidateAssets();

@@ -106,6 +106,11 @@ layer at any URL. There are five places art can go:
 | **Centre / hub** | Clipped to a circle in the middle — your logo |
 | **Pointer** | Replaces the drawn triangle |
 
+The overlay/frame layer has a **Fit to the whole browser source** switch. Left
+off it is fitted to the wheel, which keeps it square — right for a bezel, wrong
+for artwork meant to span a 16:9 source, which would be cropped to the square the
+wheel sits in. Turned on it covers the whole source.
+
 Each layer has scale, opacity, rotation and nudge controls, all as fractions of
 the wheel radius, so a layout survives the source being resized. Slice images add:
 
@@ -120,6 +125,10 @@ The **Look** tab covers the rest: a gap between wedges to turn the pie into
 separated segments, a centre hole to make it a ring, shading towards the hub,
 wedge inlines, and label controls — curved text that follows the wedge,
 uppercase, outline, shadow, and how far out the label sits.
+
+**Label colour** can be set for the whole wheel or left on *Auto*, which picks
+black or white per wedge for contrast. A slice can override either. (The
+separate *Hub label colour* only ever affected the text in the middle.)
 
 Long labels **wrap onto up to three lines and shrink to fit** rather than being
 cut short. The fit is measured both ways: each line has to fit between the rim
@@ -496,7 +505,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 249 tests
+.venv\Scripts\python -m pytest          # 251 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

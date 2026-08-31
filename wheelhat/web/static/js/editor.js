@@ -11,6 +11,7 @@ import {
   guard,
   h,
   modal,
+  plural,
   toast,
   uid,
 } from './core.js';
@@ -28,9 +29,9 @@ const DEFAULT_PALETTE = [
 const TAB_KEYS = ['slices', 'triggers', 'appearance', 'images', 'spin', 'chains'];
 
 const EASINGS = [
-  { value: 'easeOutQuint', label: 'Quint - long dramatic slowdown' },
-  { value: 'easeOutCubic', label: 'Cubic - gentler' },
-  { value: 'easeOutExpo', label: 'Expo - snappy stop' },
+  { value: 'easeOutQuint', label: 'Long dramatic slowdown' },
+  { value: 'easeOutCubic', label: 'Gentle' },
+  { value: 'easeOutExpo', label: 'Snappy stop' },
 ];
 
 function blankImage() {
@@ -117,8 +118,13 @@ export async function renderWheelEditor(main, wheelId) {
   const renderer = new WheelRenderer(canvas);
 
   function updatePreview() {
-    // The preview should look like the overlay, shadow included.
-    canvas.style.filter = shadowFilter(wheel.appearance, canvas.getBoundingClientRect().width);
+    // The preview should look like the overlay: same shape as the configured
+    // source, and the same shadow. A square preview cannot show a wide
+    // overlay being cropped, which is the thing worth seeing.
+    const sourceW = Math.max(160, Number(wheel.appearance.source_width) || 1280);
+    const sourceH = Math.max(160, Number(wheel.appearance.source_height) || 720);
+    previewBox.style.aspectRatio = `${sourceW} / ${sourceH}`;
+    canvas.style.filter = shadowFilter(wheel.appearance, canvas.getBoundingClientRect().height);
     renderer.setState({
       slices: wheel.slices
         .filter((s) => s.enabled && s.weight > 0)
@@ -167,6 +173,13 @@ export async function renderWheelEditor(main, wheelId) {
     },
     'Spin'
   );
+
+  /** Nothing to land on means nothing to spin. Kept in step with the slices. */
+  function refreshSpinButton() {
+    const spinnable = wheel.slices.some((slice) => slice.enabled && (slice.weight || 0) > 0);
+    spinButton.disabled = !spinnable;
+    spinButton.title = spinnable ? '' : 'Add a slice first';
+  }
 
   const fireActions = h('input', { type: 'checkbox', checked: false });
 
@@ -253,6 +266,7 @@ export async function renderWheelEditor(main, wheelId) {
   function refreshTabCounts() {
     tabs.children[0].textContent = `Slices (${wheel.slices.length})`;
     tabs.children[1].textContent = `Triggers (${wheel.triggers.length})`;
+    refreshSpinButton();
   }
 
   /* ---------------------------------------------------------------- slices */
@@ -319,26 +333,73 @@ export async function renderWheelEditor(main, wheelId) {
           'Recolour from palette'
         ),
         h('span.grow'),
-        h(
-          'button.btn.small.ghost',
-          {
-            title: 'Re-enable eliminated slices and clear cooldowns',
-            onclick: guard(async () => {
-              const updated = await api.post(`/wheels/${wheelId}/reset`);
-              wheel.slices = updated.slices;
-              updatePreview();
-              redraw();
-              toast('Wheel reset', 'ok');
-            }),
-          },
-          'Reset eliminations'
+        // Only when something is actually eliminated or counting down. A button
+        // that resets nothing is a question the user has to answer every visit.
+        wheel.slices.some(
+          (slice) => (slice.cooldown_remaining || 0) > 0 || (slice.remove_on_win && !slice.enabled)
         )
+          ? h(
+              'button.btn.small.ghost',
+              {
+                title: 'Re-enable eliminated slices and clear cooldowns',
+                onclick: guard(async () => {
+                  const updated = await api.post(`/wheels/${wheelId}/reset`);
+                  wheel.slices = updated.slices;
+                  updatePreview();
+                  redraw();
+                  toast('Wheel reset', 'ok');
+                }),
+              },
+              'Reset eliminations'
+            )
+          : null
       )
     );
 
     redraw();
     wrap.appendChild(list);
     return wrap;
+  }
+
+  /**
+   * A slice's label outline: the colour, and the width that makes it visible.
+   *
+   * The width is a wheel-wide setting on the Look tab. Telling someone to go
+   * and set it there turns picking a colour into a trip across two tabs, so it
+   * is offered here and writes through to the same field.
+   */
+  function outlineField(slice, redraw) {
+    const width = wheel.appearance.text_stroke_width || 0;
+    const colour = optionalColorField(
+      'Label outline',
+      slice.text_stroke_color,
+      wheel.appearance.text_stroke_color || '#000000',
+      (value) => {
+        slice.text_stroke_color = value;
+        changed();
+      }
+    );
+    if (width > 0) return colour;
+    return h(
+      'div.field',
+      colour,
+      h(
+        'div.row',
+        { style: { marginTop: '6px' } },
+        h('span.help', 'Outlines are off for this wheel.'),
+        h(
+          'button.btn.small.ghost',
+          {
+            onclick: () => {
+              wheel.appearance.text_stroke_width = 2;
+              changed();
+              redraw();
+            },
+          },
+          'Turn them on'
+        )
+      )
+    );
   }
 
   function paletteColor(index) {
@@ -385,7 +446,7 @@ export async function renderWheelEditor(main, wheelId) {
         'div.slice-controls',
         h(
           'label.slice-weight-field',
-          { title: 'Weight - a slice with weight 2 is twice as likely as one with weight 1' },
+          { title: 'Weight. A slice at 2 is twice as likely as one at 1.' },
           h('span', '×'),
           h('input.slice-weight', {
             type: 'number',
@@ -447,7 +508,7 @@ export async function renderWheelEditor(main, wheelId) {
           {
             title: 'Delete slice',
             onclick: async () => {
-              if (!(await confirmDialog(`Delete "${slice.label}" and its actions?`))) return;
+              if (!(await confirmDialog(`Delete "${slice.label}"?`, { detail: 'Its actions go too.' }))) return;
               wheel.slices.splice(index, 1);
               changed();
               redraw();
@@ -491,7 +552,7 @@ export async function renderWheelEditor(main, wheelId) {
             })
           ),
           slice.cooldown_remaining
-            ? h('span.pill.warn', `on cooldown for ${slice.cooldown_remaining} more spin(s)`)
+            ? h('span.pill.warn', `on cooldown for ${plural(slice.cooldown_remaining, 'more spin')}`)
             : null,
           optionalColorField(
             'Label colour',
@@ -506,20 +567,7 @@ export async function renderWheelEditor(main, wheelId) {
             slice.border_color = value;
             changed();
           }),
-          optionalColorField(
-            'Label outline',
-            slice.text_stroke_color,
-            wheel.appearance.text_stroke_color || '#000000',
-            (value) => {
-              slice.text_stroke_color = value;
-              changed();
-            },
-            // Nothing is drawn until the wheel gives the outline a width, so say
-            // so rather than let someone pick a colour and see no change.
-            (wheel.appearance.text_stroke_width || 0) > 0
-              ? ''
-              : 'Set an outline width on the Look tab to show this.'
-          )
+          outlineField(slice, redraw)
         ),
         (() => {
           if (!slice.image) slice.image = blankImage();
@@ -584,7 +632,10 @@ export async function renderWheelEditor(main, wheelId) {
             schemas,
             wheelId,
             onChange: () => changed({ preview: false }),
-            emptyHint: 'Nothing happens when this slice wins yet. Add an action to fire a webhook, switch an OBS scene, change your VTube Studio outfit, and so on.',
+            // Lets the picker hide a refund action on a wheel with no
+            // channel point trigger, where it could never do anything.
+            context: { triggers: wheel.triggers },
+            emptyHint: 'Nothing happens when this slice wins yet.',
           })
         )
       );
@@ -723,28 +774,84 @@ export async function renderWheelEditor(main, wheelId) {
   }
 
   function addTrigger(redraw) {
-    const body = h(
-      'div.type-options',
-      TRIGGER_TYPES.filter((t) => t.type !== 'manual').map((spec) =>
-        h(
-          'button.type-option',
-          {
-            type: 'button',
-            onclick: () => {
-              dialog.close();
-              const trigger = { id: uid('trg_'), type: spec.type, enabled: true, config: {} };
-              for (const field of spec.fields) {
-                if (field.default !== undefined) trigger.config[field.key] = field.default;
-              }
-              wheel.triggers.push(trigger);
-              changed({ preview: false });
-              redraw();
+    // Every trigger this offers needs Twitch: a wheel with no triggers is
+    // already manual, which is why `manual` is filtered out below. So being
+    // signed out means there is genuinely nothing to choose, and offering six
+    // options that cannot work - then explaining that in a pill afterwards - is
+    // worse than saying so once, here, with the way to fix it.
+    const twitch = store.twitch || {};
+    if (!twitch.signed_in) {
+      const dialog = modal({
+        title: 'Add a trigger',
+        hideConfirm: true,
+        body: h(
+          'div',
+          h('p.card-hint', 'Automatic triggers need a Twitch account.'),
+          h(
+            'a.btn.primary',
+            {
+              href: '#/twitch',
+              onclick: () => dialog.close(),
             },
-          },
-          h('strong', spec.label),
-          h('small', spec.description)
+            'Connect Twitch'
+          )
+        ),
+      });
+      return;
+    }
+
+    // Channel points and bits do not exist on a channel without affiliate
+    // status, so those two are left out rather than added and then flagged.
+    const noChannelPoints = twitch.has_channel_points === false;
+    const offered = TRIGGER_TYPES.filter(
+      (t) => t.type !== 'manual' && !(noChannelPoints && t.needsAffiliate)
+    );
+    const hidden = TRIGGER_TYPES.filter(
+      (t) => t.type !== 'manual' && noChannelPoints && t.needsAffiliate
+    );
+
+    const body = h(
+      'div',
+      h(
+        'div.type-options',
+        offered.map((spec) =>
+          h(
+            'button.type-option',
+            {
+              type: 'button',
+              onclick: () => {
+                dialog.close();
+                const trigger = { id: uid('trg_'), type: spec.type, enabled: true, config: {} };
+                for (const field of spec.fields) {
+                  if (field.default !== undefined) trigger.config[field.key] = field.default;
+                }
+                wheel.triggers.push(trigger);
+                changed({ preview: false });
+                redraw();
+              },
+            },
+            h('strong', spec.label),
+            h('small', spec.description)
+          )
         )
-      )
+      ),
+      hidden.length
+        ? h(
+            'div.help',
+            { style: { marginTop: '12px' } },
+            `Not shown: ${hidden.map((t) => t.label).join(', ')}. Channel points and bits need `,
+            h(
+              'a',
+              {
+                href: 'https://help.twitch.tv/s/article/joining-the-affiliate-program',
+                target: '_blank',
+                rel: 'noreferrer',
+              },
+              'affiliate status'
+            ),
+            '.'
+          )
+        : null
     );
     const dialog = modal({ title: 'Add a trigger', body, hideConfirm: true });
   }
@@ -822,7 +929,17 @@ export async function renderWheelEditor(main, wheelId) {
           colorField('Rim', a.rim_color, bind('rim_color')),
           colorField('Pointer', a.pointer_color, bind('pointer_color')),
           colorField('Hub', a.hub_color, bind('hub_color')),
-          colorField('Default text', a.text_color, bind('text_color'))
+          colorField('Hub label colour', a.text_color, bind('text_color')),
+          optionalColorField(
+            'Label colour (all slices)',
+            a.label_color,
+            '#ffffff',
+            (value) => {
+              a.label_color = value || '';
+              changed();
+            },
+            'Auto picks black or white per wedge for contrast. A slice can still override this.'
+          )
         )
       ),
       h(
@@ -834,12 +951,12 @@ export async function renderWheelEditor(main, wheelId) {
           field('Font family', h('input', { type: 'text', value: a.font_family, oninput: bind('font_family') })),
           field('Label size', h('input', { type: 'number', min: 8, max: 64, value: a.font_size, oninput: bind('font_size', Number) })),
           field('Label weight', h('input', { type: 'number', min: 300, max: 900, step: 100, value: a.font_weight, oninput: bind('font_weight', Number) })),
-          field(
-            'Trim labels after N characters',
-            h('input', { type: 'number', min: 6, max: 60, value: a.label_max_chars, oninput: bind('label_max_chars', Number) }),
-            'Only used when wrapping is off. With wrapping on, labels are measured '
-              + 'and sized to fit instead of being counted.'
-          ),
+          a.label_wrap === false
+            ? field(
+                'Trim labels after N characters',
+                h('input', { type: 'number', min: 6, max: 60, value: a.label_max_chars, oninput: bind('label_max_chars', Number) })
+              )
+            : null,
           field('Rim thickness', h('input', { type: 'number', min: 0, max: 40, value: a.rim_width, oninput: bind('rim_width', Number) }))
         )
       ),
@@ -873,7 +990,11 @@ export async function renderWheelEditor(main, wheelId) {
         h('h2', 'Label style'),
         h(
           'div.grid.two',
-          switchField('Wrap long labels onto more lines', a.label_wrap !== false, bind('label_wrap')),
+          switchField('Wrap long labels onto more lines', a.label_wrap !== false, (e) => {
+            a.label_wrap = e.target.checked;
+            changed();
+            drawTab();
+          }),
           switchField('Curve labels around the wheel', a.text_curved, bind('text_curved')),
           switchField('UPPERCASE labels', a.text_uppercase, bind('text_uppercase')),
           switchField('Label shadow', a.text_shadow, bind('text_shadow')),
@@ -936,12 +1057,9 @@ export async function renderWheelEditor(main, wheelId) {
               h('option', { value: 'under' }, 'Underneath the wheel'),
               h('option', { value: 'over' }, 'On top of the wheel')
             ),
-            'Underneath reserves its room whether or not a winner is showing, so '
-              + 'the wheel never changes size. On top floats it across the wheel '
-              + 'and leaves the full height for the wheel itself.'
+            'Underneath keeps the wheel at a fixed size. On top gives the wheel the full height.'
           )
         ),
-        sourceSizeCard(),
         shadowCard()
       )
     );
@@ -967,8 +1085,7 @@ export async function renderWheelEditor(main, wheelId) {
       h(
         'div.help',
         { style: { marginBottom: '10px' } },
-        'Lifts the wheel off whatever is behind it in OBS. Sizes scale with the '
-          + 'wheel, so the same setting looks right at any source size.'
+        'Sizes scale with the wheel, so they hold at any source size.'
       ),
       switchField('Cast a shadow', on, (e) => {
         a.shadow_enabled = e.target.checked;
@@ -986,53 +1103,6 @@ export async function renderWheelEditor(main, wheelId) {
           a.shadow_color = e.target.value;
           changed();
         })
-      )
-    );
-  }
-
-  /** Browser source dimensions, with a recommendation that fits every element. */
-  function sourceSizeCard() {
-    const a = wheel.appearance;
-    const best = recommendedSource(a);
-    const matches = a.source_width === best.width && a.source_height === best.height;
-
-    return h(
-      'div',
-      { style: { marginTop: '18px' } },
-      h('h3', 'Browser source size'),
-      h(
-        'div.help',
-        { style: { marginBottom: '10px' } },
-        'The size to make the browser source in OBS. WheelHat always fits whatever '
-          + 'size the source really is - these numbers shape the preview above and '
-          + 'give you something to copy into OBS.'
-      ),
-      h(
-        'div.row',
-        field('Width', h('input', {
-          type: 'number', min: 160, max: 7680, step: 10, value: a.source_width,
-          oninput: (e) => { a.source_width = Number(e.target.value) || 0; changed(); },
-          onchange: () => drawTab(),
-        })),
-        field('Height', h('input', {
-          type: 'number', min: 160, max: 4320, step: 10, value: a.source_height,
-          oninput: (e) => { a.source_height = Number(e.target.value) || 0; changed(); },
-          onchange: () => drawTab(),
-        })),
-        h(
-          'button.btn.small',
-          {
-            disabled: matches,
-            title: 'Fit the wheel, the title, the banner and any frame with nothing cropped',
-            onclick: () => {
-              a.source_width = best.width;
-              a.source_height = best.height;
-              changed();
-              drawTab();
-            },
-          },
-          matches ? `Recommended (${best.width} x ${best.height})` : `Use ${best.width} x ${best.height}`
-        )
       )
     );
   }
@@ -1060,7 +1130,7 @@ export async function renderWheelEditor(main, wheelId) {
         h('h2', 'Per-slice images'),
         h(
           'p.card-hint',
-          'Each slice has its own image, set on the Slices tab — open a slice and use its Image section. '
+          'Set on the Slices tab. Pick one below to jump there. '
             + 'Good for game covers, emotes or faces.'
         ),
         h(
@@ -1091,10 +1161,25 @@ export async function renderWheelEditor(main, wheelId) {
             : h('span.muted', 'Add a slice first.')
         )
       ),
-      card(
-        'Overlay / frame',
-        'Drawn on top of the wheel and does not spin with it. Use a transparent PNG for a bezel, glass, glow or border.',
-        'frame_image'
+      h(
+        'div',
+        card(
+          'Overlay / frame',
+          'Drawn on top of the wheel and does not spin with it. Use a transparent PNG for a bezel, glass, glow or border.',
+          'frame_image'
+        ),
+        h(
+          'div',
+          { style: { margin: '-6px 0 18px' } },
+          switchField('Fit to the whole browser source', a.frame_fills_source === true, (e) => {
+            a.frame_fills_source = e.target.checked;
+            changed();
+          }),
+          h(
+            'div.help',
+            'On for artwork that spans the whole source. Off keeps it square around the wheel.'
+          )
+        )
       ),
       card(
         'Background',
@@ -1159,6 +1244,7 @@ export async function renderWheelEditor(main, wheelId) {
           schemas,
           wheelId,
           onChange: () => changed({ preview: false }),
+          context: { triggers: wheel.triggers },
           emptyHint: 'Nothing runs before a spin. A good spot for a drumroll sound or an OBS scene change.',
         })
       ),
@@ -1171,6 +1257,7 @@ export async function renderWheelEditor(main, wheelId) {
           schemas,
           wheelId,
           onChange: () => changed({ preview: false }),
+          context: { triggers: wheel.triggers },
           emptyHint: 'Nothing runs after a spin. Useful for announcing the result in chat once per spin.',
         })
       )
@@ -1179,10 +1266,64 @@ export async function renderWheelEditor(main, wheelId) {
 
   /* ------------------------------------------------------------------ mount */
 
+  /**
+   * Width, height and the recommended size, next to the URL they describe.
+   *
+   * This used to sit inside "Overlay behaviour" on the Look tab, two tabs from
+   * the browser source URL: two sections named for the same OBS object, with a
+   * round trip in the middle of setting one up. It redraws itself rather than
+   * the tab, because it no longer lives on one.
+   */
+  function sourceSizeBlock() {
+    const box = h('div', { style: { marginTop: '14px' } });
+    const render = () => {
+      const a = wheel.appearance;
+      const best = recommendedSource(a);
+      const matches = a.source_width === best.width && a.source_height === best.height;
+      const number = (key, label) =>
+        h(
+          'div.field',
+          h('label', label),
+          h('input', {
+            type: 'number', min: 160, max: 7680, step: 10, value: a[key],
+            oninput: (e) => {
+              a[key] = Number(e.target.value) || 0;
+              changed();
+            },
+            onchange: render,
+          })
+        );
+      clear(box);
+      box.append(
+        h('div.grid.two', number('source_width', 'Width'), number('source_height', 'Height')),
+        h(
+          'div.row',
+          { style: { marginTop: '10px' } },
+          h(
+            'button.btn.small',
+            {
+              disabled: matches,
+              title: 'Fits the wheel, the title, the banner and any frame with nothing cropped',
+              onclick: () => {
+                a.source_width = best.width;
+                a.source_height = best.height;
+                changed();
+                render();
+              },
+            },
+            matches ? `Recommended (${best.width} x ${best.height})` : `Use ${best.width} x ${best.height}`
+          )
+        )
+      );
+    };
+    render();
+    return box;
+  }
+
   const overlayCard = h(
     'div.card',
     h('h2', 'Browser source'),
-    h('p.card-hint', 'Add this URL as a Browser source in OBS. 1920×1080 works well; tick "Shutdown source when not visible" off so it stays connected.'),
+    h('p.card-hint', 'Add this URL as a Browser source in OBS at the size below, and untick "Shutdown source when not visible" so it stays connected.'),
     h(
       'div.overlay-url',
       h('code', overlayUrl),
@@ -1196,21 +1337,24 @@ export async function renderWheelEditor(main, wheelId) {
         'button.btn.small.ghost',
         { onclick: guard(async () => {
           const result = await api.post(`/wheels/${wheelId}/refresh-overlays`);
-          toast(`Refreshed ${result.clients} connected source(s)`, 'ok');
+          toast(`Refreshed ${plural(result.clients, 'connected source')}`, 'ok');
         }) },
         'Push update to sources'
       ),
       h('span.grow'),
       h('span.pill', { id: 'overlayCount' }, `${wheel.overlay_clients || 0} connected`)
-    )
+    ),
+    sourceSizeBlock()
   );
 
+  // An integration hook, shown above the fold to everyone before they have made
+  // a slice. Worth keeping, not worth leading with.
   const triggerCard = h(
-    'div.card',
-    h('h2', 'Spin from another app'),
+    'details.card',
+    h('summary', 'Spin from another app'),
     h(
       'p.card-hint',
-      'Fetch this URL to spin the wheel. Works with Streamer.bot’s Fetch URL sub-action, a stream deck button, Touch Portal, SAMMI — anything that can open a URL.'
+      'Open this URL from anything that can make a web request: a Stream Deck button, Touch Portal, Streamer.bot’s Fetch URL.'
     ),
     h(
       'div.overlay-url',

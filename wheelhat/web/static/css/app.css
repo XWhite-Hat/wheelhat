@@ -345,6 +345,64 @@ a {
   padding: 18px;
 }
 
+/* A card that folds away. Used for things worth keeping but not worth putting
+   in front of someone who will never want them. */
+details.card > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  list-style: none;
+}
+
+details.card > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.card > summary::before {
+  content: 'b8';
+  display: inline-block;
+  width: 1em;
+  color: var(--text-dim);
+  transition: transform 120ms ease;
+}
+
+details.card[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.card > summary + * {
+  margin-top: 12px;
+}
+
+/* A fold that is not a card: used inline, for rows worth keeping but not
+   worth listing. */
+details.fold > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim);
+  list-style: none;
+}
+
+details.fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.fold > summary::before {
+  content: 'b8';
+  display: inline-block;
+  width: 1em;
+  transition: transform 120ms ease;
+}
+
+details.fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.fold[open] > summary {
+  margin-bottom: 8px;
+}
+
 .card + .card {
   margin-top: 14px;
 }

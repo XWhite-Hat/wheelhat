@@ -116,7 +116,12 @@ class Trigger(BaseModel):
 
 class Appearance(BaseModel):
     palette: list[str] = Field(default_factory=lambda: list(DEFAULT_PALETTE))
+    #: The hub label ("SPIN"). Wedge labels use label_color.
     text_color: str = "#ffffff"
+    #: Wheel-wide colour for wedge labels. Empty means pick black or white
+    #: automatically for contrast against each wedge, which is the default
+    #: and what every wheel did before this existed. A slice can override it.
+    label_color: str = ""
     rim_color: str = "#111318"
     rim_width: int = 10
     pointer_color: str = "#ffffff"
@@ -182,6 +187,10 @@ class Appearance(BaseModel):
     hub_image: ImageLayer = Field(default_factory=ImageLayer)
     #: Drawn over the wheel and does not spin - frames, glass, bezels, glow.
     frame_image: ImageLayer = Field(default_factory=ImageLayer)
+    #: Fit the frame to the whole browser source rather than to the wheel.
+    #: A frame sized to the wheel is confined to the square the wheel sits
+    #: in, so a wide overlay meant to span a 16:9 source was cropped.
+    frame_fills_source: bool = False
     #: Replaces the drawn pointer triangle.
     pointer_image: ImageLayer = Field(default_factory=ImageLayer)
     show_title: bool = True

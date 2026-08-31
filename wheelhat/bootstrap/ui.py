@@ -139,12 +139,12 @@ class _SetupWizard(ctk.CTk, _DownloadMixin):
                 f"\n{APP_NAME} needs two things before it can start.\n\n"
                 "1.  A folder for your wheels, images and settings.\n"
                 "     Everything it saves lives there, and nowhere else.\n\n"
+                # The licensing reason Qt sits beside the data is correct, but
+                # this is the first screen anyone ever sees. It is in the About
+                # dialog and the README, which is where someone asking will look.
                 "2.  The Qt interface library (PySide6), about 100 MB.\n"
                 "     It is downloaded from PyPI and checked against the\n"
-                "     official SHA-256 before anything is installed.\n\n"
-                "Qt is kept beside your data rather than inside the\n"
-                "application so you are free to replace it, which is what\n"
-                "its licence asks for.\n"
+                "     official SHA-256 before anything is installed.\n"
             ),
         ).pack(anchor="w")
 

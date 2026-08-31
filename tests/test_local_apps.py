@@ -1,6 +1,8 @@
 """Mix It Up, Speaker.bot, SAMMI and VNyan connectors, actions and discovery."""
 
 import asyncio
+import pathlib
+import re
 
 import pytest
 import websockets
@@ -371,3 +373,36 @@ async def test_a_bare_tcp_probe_never_claims_the_app_is_ready():
     finally:
         server.close()
         await server.wait_closed()
+
+
+# The Connections page groups the scan into what is running and what is not,
+# and splits integrations into "yours" and blank forms behind a disclosure.
+# Both groupings read fields from the API, so the field values are a contract.
+
+def test_discovery_statuses_are_the_ones_the_page_groups_on():
+    """The page hides `not_found` behind a fold and shows the rest. A new status
+    would silently land in the visible group."""
+    source = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "discovery.py"
+    text = source.read_text(encoding="utf-8")
+    known = {"ready", "listening", "running_no_server", "not_found"}
+    declared = set(re.findall(r'"(ready|listening|running_no_server|not_found)"', text))
+    assert declared == known, f"discovery statuses changed: {declared ^ known}"
+
+
+async def test_integrations_report_enabled_so_the_page_can_split_them():
+    """"Your connections" is the enabled ones; the rest are blank forms."""
+    import httpx
+
+    from wheelhat.app import app
+    from wheelhat.integrations.registry import registry
+
+    registry.load()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/integrations")
+    assert response.status_code == 200
+    integrations = response.json()["integrations"]
+    assert integrations, "the page needs something to group"
+    for integration in integrations:
+        assert "enabled" in integration, f"{integration.get('kind')} has no enabled flag"
+        assert "kind" in integration

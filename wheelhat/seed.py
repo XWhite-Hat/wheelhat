@@ -23,8 +23,9 @@ def ensure_starter_wheel() -> None:
 
     wheel = Wheel(
         name="Punishment Wheel",
-        description="A starter wheel. Every slice already has an example action wired up "
-        "but switched off - open one, point it at your own setup, then enable it.",
+        # A data field, not a place for instructions: it renders on the wheel
+        # card for as long as the wheel exists.
+        description="A starter wheel. Each slice has an example action, switched off.",
         appearance=Appearance(hub_label="SPIN"),
         spin=SpinSettings(duration_ms=6500, cooldown_seconds=0),
         triggers=[

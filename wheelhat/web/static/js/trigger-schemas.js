@@ -19,7 +19,7 @@ const COOLDOWN_FIELDS = [
     type: 'number',
     default: 0,
     min: 0,
-    help: 'Ignore this trigger for a while after it fires. 0 disables the cooldown.',
+    help: '0 means no cooldown.',
   },
   {
     key: 'user_cooldown_seconds',
@@ -65,10 +65,9 @@ export const TRIGGER_TYPES = [
         when: { field: 'reward_id', in_source: 'twitch.rewards.manageable' },
         label: 'Close the redemption once the wheel has spun',
         type: 'bool',
-        help:
-          'Marks it fulfilled in your queue instead of leaving it for you to clear. '
-          + 'Twitch only allows this for rewards WheelHat created - use "Create a reward" '
-          + 'on the Twitch page, since rewards made on Twitch itself cannot be closed by us.',
+        // Already hidden unless the reward is one WheelHat created, so the old
+        // explanation of that rule had no reader left.
+        help: 'Marks it fulfilled in your redemption queue.',
       },
       {
         key: 'refund_on_failure',

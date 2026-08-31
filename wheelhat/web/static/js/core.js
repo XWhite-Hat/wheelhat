@@ -202,11 +202,20 @@ export function modal({ title, body, confirmLabel = 'Save', onConfirm, wide = fa
   return { close, element: backdrop };
 }
 
-export function confirmDialog(message, { confirmLabel = 'Delete', danger = true } = {}) {
+/**
+ * "1 wheel", "2 wheels". Three places used to bracket a trailing s and one did
+ * it properly, which is three too many ways to say the same thing.
+ */
+export function plural(count, one, many = `${one}s`) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+export function confirmDialog(message, { confirmLabel = 'Delete', danger = true, detail = '' } = {}) {
   return new Promise((resolve) => {
     const dialog = modal({
-      title: 'Are you sure?',
-      body: h('p', { style: { margin: 0 } }, message),
+      // The question itself, rather than "Are you sure?" over the top of it.
+      title: message,
+      body: detail ? h('p', { style: { margin: 0 } }, detail) : null,
       confirmLabel,
       onConfirm: () => {
         resolve(true);
