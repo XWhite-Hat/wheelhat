@@ -380,7 +380,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 201 tests
+.venv\Scripts\python -m pytest          # 203 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

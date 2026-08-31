@@ -7,9 +7,12 @@ app or an error.
 """
 
 import contextlib
+import importlib
 import socket
+import sys
 
 import httpx
+import pytest
 
 from wheelhat.desktop.server import ServerThread, find_free_port
 
@@ -113,3 +116,52 @@ def test_server_thread_can_be_restarted_on_the_same_port():
 
 def test_stopping_a_server_that_never_started_is_harmless():
     ServerThread("127.0.0.1", free_port()).stop()
+
+
+class _BlockPySide6:
+    """An import hook that makes PySide6 look uninstalled."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "PySide6" or name.startswith("PySide6."):
+            raise ModuleNotFoundError(f"No module named {name!r}")
+        return None
+
+
+@contextlib.contextmanager
+def pyside6_uninstalled():
+    saved = {k: v for k, v in sys.modules.items() if k.startswith(("PySide6", "wheelhat.desktop"))}
+    for key in saved:
+        del sys.modules[key]
+    sys.meta_path.insert(0, _BlockPySide6())
+    try:
+        yield
+    finally:
+        sys.meta_path.pop(0)
+        for key in [k for k in sys.modules if k.startswith(("PySide6", "wheelhat.desktop"))]:
+            del sys.modules[key]
+        sys.modules.update(saved)
+
+
+def test_server_module_imports_without_pyside6():
+    """A headless install has no Qt, and CI installs no desktop extra.
+
+    The package used to import the Qt application eagerly, so merely importing
+    the Qt-free server module pulled in PySide6 and broke every test run that
+    lacked it. Blocked explicitly here so the test still means something on a
+    machine where PySide6 happens to be installed.
+    """
+    with pyside6_uninstalled():
+        module = importlib.import_module("wheelhat.desktop.server")
+        assert callable(module.find_free_port)
+
+
+def test_run_desktop_still_raises_importerror_without_pyside6():
+    """__main__ catches ImportError to fall back to the browser interface.
+
+    Making the import lazy must not turn that into an AttributeError, or the
+    fallback stops working and the user sees a traceback instead.
+    """
+    with pyside6_uninstalled():
+        package = importlib.import_module("wheelhat.desktop")
+        with pytest.raises(ImportError):
+            _ = package.run_desktop
