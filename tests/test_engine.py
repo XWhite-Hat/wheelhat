@@ -1,6 +1,5 @@
 """Spin engine: selection fairness, cooldowns, eliminations, concurrency."""
 
-import asyncio
 from collections import Counter
 
 import pytest
@@ -37,7 +36,7 @@ async def test_spin_resolves_and_records_history(action_wheel):
     assert result["winner"] == "Only"
     assert engine.is_spinning(action_wheel.id)
 
-    await asyncio.sleep(1.2)
+    await engine.wait_for(action_wheel.id)
     assert not engine.is_spinning(action_wheel.id)
 
     spins = db.list_spins(action_wheel.id)
@@ -59,7 +58,7 @@ async def test_cooldown_blocks_triggered_spins(action_wheel):
 
     engine = SpinEngine()
     await engine.spin(action_wheel.id)
-    await asyncio.sleep(0.9)
+    await engine.wait_for(action_wheel.id)
 
     with pytest.raises(SpinRejected, match="cooldown"):
         await engine.spin(action_wheel.id, source="channel_points")
@@ -77,7 +76,7 @@ async def test_remove_on_win_disables_the_slice(action_wheel):
 
     engine = SpinEngine()
     await engine.spin(action_wheel.id)
-    await asyncio.sleep(1.2)
+    await engine.wait_for(action_wheel.id)
 
     after = db.get_wheel(action_wheel.id)
     assert after.slices[0].enabled is False
@@ -100,7 +99,7 @@ async def test_slice_cooldown_counts_down_over_spins():
 
     engine = SpinEngine()
     await engine.spin(made.id, force_slice_id="sl_1")
-    await asyncio.sleep(0.6)
+    await engine.wait_for(made.id)
 
     after = db.get_wheel(made.id)
     one = after.slice_by_id("sl_1")
@@ -109,7 +108,7 @@ async def test_slice_cooldown_counts_down_over_spins():
 
     # A later spin ticks it down.
     await engine.spin(made.id, force_slice_id="sl_2")
-    await asyncio.sleep(0.6)
+    await engine.wait_for(made.id)
     assert db.get_wheel(made.id).slice_by_id("sl_1").cooldown_remaining == 1
 
 
@@ -123,7 +122,7 @@ async def test_force_slice_wins_even_when_on_cooldown(action_wheel):
 async def test_skip_actions_still_records_the_spin(action_wheel):
     engine = SpinEngine()
     await engine.spin(action_wheel.id, skip_actions=True)
-    await asyncio.sleep(1.2)
+    await engine.wait_for(action_wheel.id)
     assert db.list_spins(action_wheel.id)
     assert not db.list_action_log(10)
 

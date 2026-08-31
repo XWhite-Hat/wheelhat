@@ -78,6 +78,24 @@ class SpinEngine:
     def active_spin(self, wheel_id: str) -> Optional[ActiveSpin]:
         return self._active.get(wheel_id)
 
+    async def wait_for(self, wheel_id: str, timeout: float = 30.0) -> bool:
+        """Wait for an in-flight spin to finish resolving. True if one was running.
+
+        A spin resolves on a background task, so anything that needs the result
+        to have landed - a shutdown, or a test asserting on the recorded win -
+        would otherwise have to guess how long to sleep. Guessing races the
+        duration floor applied in spin(), which is exactly the kind of timing
+        assumption that passes on a developer machine and fails on a loaded CI
+        runner. The task is awaited, never cancelled, so a timeout leaves the
+        spin to finish on its own.
+        """
+        active = self._active.get(wheel_id)
+        task = active.task if active else None
+        if task is None:
+            return False
+        await asyncio.wait({task}, timeout=timeout)
+        return True
+
     def cooldown_remaining(self, wheel: Wheel) -> float:
         if wheel.spin.cooldown_seconds <= 0:
             return 0.0

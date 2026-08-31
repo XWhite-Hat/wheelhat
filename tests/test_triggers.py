@@ -1,10 +1,10 @@
 """Turning Twitch events into spins: normalisation, matching and cooldowns."""
 
-import asyncio
 
 import pytest
 
 from wheelhat import db, triggers
+from wheelhat.engine import engine
 from wheelhat.models import Slice, Trigger, Wheel
 
 REDEEM = "channel.channel_points_custom_reward_redemption.add"
@@ -142,7 +142,7 @@ def test_raid_threshold():
 async def test_matching_event_spins_the_wheel():
     wheel = make_wheel(Trigger(type="channel_points", config={"reward_id": "r-1"}))
     await triggers.handle_twitch_event(REDEEM, redemption())
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
     spins = db.list_spins(wheel.id)
     assert len(spins) == 1
     assert spins[0].source == "channel_points"
@@ -156,7 +156,7 @@ async def test_disabled_wheel_does_not_spin():
     db.save_wheel(stored)
 
     await triggers.handle_twitch_event(REDEEM, redemption())
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
     assert db.list_spins(wheel.id) == []
 
 
@@ -165,7 +165,7 @@ async def test_disabled_trigger_does_not_spin():
         Trigger(type="channel_points", enabled=False, config={"reward_id": "r-1"})
     )
     await triggers.handle_twitch_event(REDEEM, redemption())
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
     assert db.list_spins(wheel.id) == []
 
 
@@ -174,7 +174,7 @@ async def test_two_wheels_can_watch_different_rewards():
     second = make_wheel(Trigger(type="channel_points", config={"reward_id": "r-2"}), "Second")
 
     await triggers.handle_twitch_event(REDEEM, redemption(reward_id="r-2"))
-    await asyncio.sleep(0.9)
+    await engine.wait_for(second.id)
 
     assert db.list_spins(first.id) == []
     assert len(db.list_spins(second.id)) == 1
@@ -185,9 +185,9 @@ async def test_trigger_cooldown_blocks_the_second_event():
         Trigger(type="channel_points", config={"reward_id": "r-1", "cooldown_seconds": 300})
     )
     await triggers.handle_twitch_event(REDEEM, redemption())
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
     await triggers.handle_twitch_event(REDEEM, redemption())
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
     assert len(db.list_spins(wheel.id)) == 1
 
 
@@ -196,15 +196,15 @@ async def test_per_user_cooldown_still_lets_another_viewer_through():
         Trigger(type="channel_points", config={"reward_id": "r-1", "user_cooldown_seconds": 300})
     )
     await triggers.handle_twitch_event(REDEEM, redemption(user="Ann"))
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
 
     second = redemption(user="Ann")
     await triggers.handle_twitch_event(REDEEM, second)
-    await asyncio.sleep(0.6)
+    await engine.wait_for(wheel.id)
     assert len(db.list_spins(wheel.id)) == 1
 
     other = redemption(user="Bob")
     other["user_id"] = "99"
     await triggers.handle_twitch_event(REDEEM, other)
-    await asyncio.sleep(0.9)
+    await engine.wait_for(wheel.id)
     assert len(db.list_spins(wheel.id)) == 2
