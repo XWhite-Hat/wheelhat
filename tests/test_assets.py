@@ -1,5 +1,7 @@
 """The asset library: uploads, validation, and the paths that must not escape."""
 
+from pathlib import PurePosixPath, PureWindowsPath
+
 import httpx
 import pytest
 
@@ -159,3 +161,28 @@ async def test_uploaded_assets_are_served_with_an_inert_csp(client):
     assert "sandbox" in csp
     assert "default-src 'none'" in csp
     assert response.headers.get("x-content-type-options") == "nosniff"
+
+
+def test_safe_name_does_not_depend_on_the_host_os():
+    """The same upload must produce the same filename on Windows and Linux.
+
+    Path().name only splits on the separators native to the host, so a
+    Windows-style name uploaded to a Linux stream box used to keep its
+    directories, flattened into the filename. Whatever is fed in, the result
+    is a single component with no separator left in it - the property that
+    keeps writes inside the assets folder.
+    """
+    hostile = [
+        "logo.png",
+        "../../../../etc/passwd.png",
+        r"..\..\windows\system32\evil.png",
+        "/absolute/path/pic.jpg",
+        r"C:\Users\me\pic.jpg",
+        "mixed/sep" + chr(92) + "name.png",
+    ]
+    for raw in hostile:
+        out = safe_name(raw)
+        assert "/" not in out, raw
+        assert chr(92) not in out, raw
+        assert ".." not in out, raw
+        assert out == PurePosixPath(out).name == PureWindowsPath(out).name, raw

@@ -39,6 +39,10 @@ SOUND_EXTENSIONS = {".mp3", ".wav", ".ogg"}
 ALLOWED = IMAGE_EXTENSIONS | SOUND_EXTENSIONS
 
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+# Both separators, on every platform. Path().name only splits on the ones
+# native to the host, so a Windows-style name uploaded to a Linux stream box
+# would otherwise keep its directories, flattened into the filename.
+_SEPARATORS = re.compile(r"[\\/]")
 
 
 def safe_name(raw: str) -> str:
@@ -48,7 +52,7 @@ def safe_name(raw: str) -> str:
     conservative character set is collapsed, so no input can escape the assets
     directory or produce a hidden/relative name.
     """
-    stem = Path(raw or "").name
+    stem = _SEPARATORS.split(raw or "")[-1]
     cleaned = _SAFE.sub("-", stem).strip("-._")
     if not cleaned:
         raise HTTPException(status_code=422, detail="That filename cannot be used.")
@@ -65,7 +69,7 @@ def safe_name(raw: str) -> str:
 
 def resolve(name: str) -> Path:
     """Map a stored name onto a path, refusing anything outside the folder."""
-    target = (config.ASSETS_DIR / Path(name).name).resolve()
+    target = (config.ASSETS_DIR / _SEPARATORS.split(name or "")[-1]).resolve()
     root = config.ASSETS_DIR.resolve()
     if root not in target.parents:
         raise HTTPException(status_code=400, detail="Invalid asset name.")
