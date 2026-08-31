@@ -126,6 +126,10 @@ class Appearance(BaseModel):
     font_size: int = 20
     font_weight: int = 700
     label_max_chars: int = 22
+    #: Wrap a label onto up to three lines and size it to fit, rather than
+    #: cutting it short. Turn off for strictly one line per wedge, where
+    #: label_max_chars applies instead.
+    label_wrap: bool = True
     size: int = 720
     background: str = "transparent"
     #: The browser source this wheel is designed for. Nothing is forced to these

@@ -22,6 +22,11 @@ export const RESULT_BAND = 84;
 export const EDGE_PADDING = 24;
 // Matches Appearance.size in models.py - the wheel size a new wheel starts at.
 export const DEFAULT_WHEEL_SIZE = 720;
+// Most labels are one or two lines; beyond three the text is too small to
+// read on stream, so the last line is trimmed instead.
+const MAX_LABEL_LINES = 3;
+// Line spacing as a multiple of the font size.
+const LINE_HEIGHT = 1.12;
 
 const EASINGS = {
   easeOutQuint: (t) => 1 - Math.pow(1 - t, 5),
@@ -48,6 +53,7 @@ const DEFAULT_APPEARANCE = {
   font_size: 20,
   font_weight: 700,
   label_max_chars: 22,
+  label_wrap: true,
   idle_spin_speed: 0,
 
   wedge_gap: 0,
@@ -121,6 +127,44 @@ export function recommendedSource(appearance = {}) {
     width: box + EDGE_PADDING * 2,
     height: box + title + (under ? RESULT_BAND : 0) + EDGE_PADDING * 2,
   };
+}
+
+/** Greedy word wrap at the context's current font. */
+function wrapLines(ctx, words, room) {
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && ctx.measureText(candidate).width > room) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Widest of a set of lines at the current font. */
+function widestLine(ctx, lines) {
+  return lines.reduce((widest, line) => Math.max(widest, ctx.measureText(line).width), 0);
+}
+
+/**
+ * Trim a label with an ellipsis until it fits the width available.
+ *
+ * label_max_chars trims by character count, which says nothing about how
+ * wide the result actually is - twenty-two wide characters still overrun.
+ * The font is measured first; this only runs when shrinking was not enough.
+ */
+function fitText(ctx, label, room) {
+  if (ctx.measureText(label).width <= room) return label;
+  let text = label;
+  while (text.length > 1 && ctx.measureText(`${text}…`).width > room) {
+    text = text.slice(0, -1);
+  }
+  return `${text}…`;
 }
 
 /** Clamp into a range; the editor lets people type anything. */
@@ -284,7 +328,7 @@ export class WheelRenderer {
 
     geo.forEach((entry, index) => this._drawWedge(ctx, entry, index, radius, inner, scale));
     geo.forEach((entry) => this._drawSliceImage(ctx, entry, radius, inner, scale));
-    geo.forEach((entry, index) => this._drawLabel(ctx, entry, index, radius, scale));
+    geo.forEach((entry, index) => this._drawLabel(ctx, entry, index, radius, inner, scale));
 
     ctx.restore();
 
@@ -447,24 +491,34 @@ export class WheelRenderer {
     ctx.fillText('No slices yet', cx, cy);
   }
 
-  _drawLabel(ctx, entry, index, radius, scale) {
+  _drawLabel(ctx, entry, index, radius, inner, scale) {
     const look = this.appearance;
     if (entry.slice.image?.replace_label && layerActive(entry.slice.image)) return;
 
-    const maxChars = look.label_max_chars || 22;
     let label = String(entry.slice.label ?? '');
     if (look.text_uppercase) label = label.toUpperCase();
-    if (label.length > maxChars) label = `${label.slice(0, maxChars - 1)}…`;
+    // The character cap is a blunt instrument - it counts letters, which says
+    // nothing about how wide they are. It still applies when wrapping is off,
+    // where a single line has to be cut somewhere; with wrapping on, fitting is
+    // decided by measurement instead and the cap would only throw away words
+    // that would have fitted.
+    if (look.label_wrap === false) {
+      const maxChars = look.label_max_chars || 22;
+      if (label.length > maxChars) label = `${label.slice(0, maxChars - 1)}…`;
+    }
     if (!label) return;
 
     // Shrink the font when wedges get thin so labels stay inside their slice.
     const arcHeight = entry.span * radius;
     const base = look.font_size * scale;
-    const fontSize = Math.max(9 * scale, Math.min(base, arcHeight * 0.62));
+    let fontSize = Math.max(9 * scale, Math.min(base, arcHeight * 0.62));
     const color = entry.slice.text_color || contrastColor(this.colorFor(entry.slice, index));
 
     ctx.save();
-    ctx.font = `${look.font_weight} ${fontSize}px ${look.font_family}`;
+    const applyFont = () => {
+      ctx.font = `${look.font_weight} ${fontSize}px ${look.font_family}`;
+    };
+    applyFont();
     ctx.fillStyle = color;
     if (look.text_shadow) {
       ctx.shadowColor = 'rgba(0,0,0,0.35)';
@@ -486,12 +540,60 @@ export class WheelRenderer {
     if (look.text_curved) {
       this._drawCurvedLabel(ctx, label, entry, radius, stroking);
     } else {
+      const x = radius * clamp(look.text_radial ?? 0.94, 0.1, 1) - 6 * scale;
+
+      // Labels are right-aligned at the rim and grow inward, so the room they
+      // have is what is left before whatever occupies the middle - the hub, or
+      // a donut hole. Only the wedge's arc height was checked before, which
+      // says nothing about length, so a long label ran straight over the hub.
+      const blocked = Math.max(inner, this._hubRadius(radius, scale));
+      const room = Math.max(24 * scale, x - blocked - 4 * scale);
+
+      const floor = 8 * scale;
+      let lines = [label];
+
+      if (look.label_wrap === false) {
+        // Single line: shrink, then trim what still will not fit.
+        const measured = ctx.measureText(label).width;
+        if (measured > room) {
+          fontSize = Math.max(floor, (fontSize * room) / measured);
+          applyFont();
+          lines = [fitText(ctx, label, room)];
+        }
+      } else {
+        // Wrap instead of throwing words away, at the largest size that fits
+        // both directions: each line inside `room` radially, and the whole
+        // block inside the wedge tangentially. The wedge narrows towards the
+        // hub, so the height is checked where the text is innermost - its
+        // widest line - which is the tightest point.
+        const words = label.split(/\s+/).filter(Boolean);
+        for (let attempt = 0; attempt < 14; attempt += 1) {
+          applyFont();
+          lines = wrapLines(ctx, words, room).slice(0, MAX_LABEL_LINES);
+          const innerRadius = Math.max(blocked, x - widestLine(ctx, lines));
+          const available = entry.span * innerRadius * 0.84;
+          const fits =
+            lines.length * fontSize * LINE_HEIGHT <= available &&
+            widestLine(ctx, lines) <= room;
+          if (fits || fontSize <= floor) break;
+          fontSize = Math.max(floor, fontSize * 0.92);
+        }
+        // A single long word cannot be wrapped, and three lines may still be
+        // too many at the smallest size. Trim whatever is left over.
+        applyFont();
+        lines = lines.map((line) => fitText(ctx, line, room));
+      }
+
       ctx.rotate(entry.center);
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
-      const x = radius * clamp(look.text_radial ?? 0.94, 0.1, 1) - 6 * scale;
-      if (stroking) ctx.strokeText(label, x, 0);
-      ctx.fillText(label, x, 0);
+      const step = fontSize * LINE_HEIGHT;
+      const top = -((lines.length - 1) / 2) * step;
+      lines.forEach((line, lineIndex) => {
+        const y = top + lineIndex * step;
+        if (stroking) ctx.strokeText(line, x, y);
+        ctx.fillText(line, x, y);
+      });
     }
     ctx.restore();
   }
@@ -535,11 +637,18 @@ export class WheelRenderer {
     ctx.stroke();
   }
 
+  /** Radius of whatever sits in the middle, or 0 when nothing is drawn there. */
+  _hubRadius(radius, scale) {
+    const look = this.appearance;
+    if (look.show_hub === false && !layerActive(look.hub_image)) return 0;
+    return Math.max(10 * scale, radius * clamp(look.hub_radius ?? 0.14, 0.02, 0.9));
+  }
+
   _drawHub(ctx, cx, cy, radius, scale) {
     const look = this.appearance;
     const hasImage = layerActive(look.hub_image);
     if (look.show_hub === false && !hasImage) return;
-    const hubRadius = Math.max(10 * scale, radius * clamp(look.hub_radius ?? 0.14, 0.02, 0.9));
+    const hubRadius = this._hubRadius(radius, scale);
 
     if (look.show_hub !== false) {
       ctx.beginPath();

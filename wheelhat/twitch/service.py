@@ -118,7 +118,7 @@ class TwitchService:
             log.warning("Stored Twitch token unusable: %s", exc)
             await self.broadcast_status()
             return
-        await self._eventsub.start()
+        await self.sync_eventsub()
         self._refresh_task = asyncio.create_task(self._refresh_loop(), name="twitch-refresh")
 
     async def stop(self) -> None:
@@ -197,7 +197,7 @@ class TwitchService:
                 self.flow = None
 
                 await self._eventsub.stop()
-                await self._eventsub.start()
+                await self.sync_eventsub()
                 if self._refresh_task is None or self._refresh_task.done():
                     self._refresh_task = asyncio.create_task(
                         self._refresh_loop(), name="twitch-refresh"
@@ -298,15 +298,20 @@ class TwitchService:
             return response.json()
         return {}
 
-    async def list_rewards(self) -> list[dict[str, Any]]:
+    async def list_rewards(self, manageable_only: bool = False) -> list[dict[str, Any]]:
+        """The channel's custom rewards.
+
+        manageable_only limits the list to rewards this application created.
+        Those are the only ones whose redemptions Twitch will let it close, so
+        it is what the reward picker uses when offering to manage redemptions.
+        """
         if not self.tokens.user_id:
             raise AuthError("Sign in to Twitch first.")
-        data = await self.helix(
-            "GET",
-            "/channel_points/custom_rewards",
-            params={"broadcaster_id": self.tokens.user_id},
-        )
-        return data.get("data", [])
+        params: dict[str, Any] = {"broadcaster_id": self.tokens.user_id}
+        if manageable_only:
+            params["only_manageable_rewards"] = "true"
+        data = await self.helix("GET", "/channel_points/custom_rewards", params=params)
+        return list(data.get("data", []))
 
     async def send_chat(self, message: str, reply_parent_message_id: str | None = None) -> None:
         if not self.tokens.user_id:
@@ -347,10 +352,35 @@ class TwitchService:
     async def _on_session(self, session_id: str) -> None:
         await self.subscribe_all(session_id)
 
+    async def sync_eventsub(self) -> None:
+        """Hold an EventSub socket only while something is listening on it.
+
+        Twitch closes a socket that has no subscriptions about ten seconds after
+        the welcome, with code 4003 "connection unused". Connecting when no
+        wheel has a trigger therefore does not idle - it produces a permanent
+        connect, drop, retry loop against Twitch, filling the log with dropped
+        connections and re-listing subscriptions once a minute forever.
+
+        Only ever called from outside the socket's own task. stop() cancels that
+        task, so calling this from _on_session would cancel the task from within
+        itself.
+        """
+        if self.needed_subscription_types():
+            await self._eventsub.start()  # no-op when already running
+            return
+        if self._eventsub.session_id or self._eventsub.running:
+            log.info("No wheel is listening for Twitch events; closing the EventSub socket")
+            await self._eventsub.stop()
+        self.subscriptions = []
+        self.sub_errors = []
+
     async def resubscribe(self) -> None:
         """Called after wheels change so new trigger types start listening."""
+        await self.sync_eventsub()
         if self._eventsub.session_id:
             await self.subscribe_all(self._eventsub.session_id)
+        else:
+            await self.broadcast_status()
 
     async def subscribe_all(self, session_id: str) -> None:
         self.subscriptions = []
@@ -413,6 +443,92 @@ class TwitchService:
             await handle_twitch_event(event_type, event)
         except Exception:  # noqa: BLE001
             log.exception("Failed handling Twitch event %s", event_type)
+
+
+    # --------------------------------------------------------- channel points
+
+    async def create_reward(
+        self,
+        title: str,
+        cost: int,
+        *,
+        prompt: str = "",
+        background_color: str = "",
+        user_input: bool = False,
+        cooldown_seconds: int = 0,
+        max_per_stream: int = 0,
+        max_per_user_per_stream: int = 0,
+    ) -> dict[str, Any]:
+        """Create a reward owned by this application.
+
+        Redemptions deliberately go to the queue rather than being fulfilled on
+        the spot: WheelHat marks them fulfilled once the wheel has actually
+        spun, and refunds them when it could not. Skipping the queue would make
+        both impossible, because the redemption is already closed on arrival.
+        """
+        body: dict[str, Any] = {
+            "title": title.strip()[:45],
+            "cost": max(1, int(cost)),
+            "is_enabled": True,
+            "is_user_input_required": bool(user_input),
+            "should_redemptions_skip_request_queue": False,
+        }
+        if prompt.strip():
+            body["prompt"] = prompt.strip()[:200]
+        if background_color.strip():
+            body["background_color"] = background_color.strip()
+        if cooldown_seconds > 0:
+            body["is_global_cooldown_enabled"] = True
+            body["global_cooldown_seconds"] = int(cooldown_seconds)
+        if max_per_stream > 0:
+            body["is_max_per_stream_enabled"] = True
+            body["max_per_stream"] = int(max_per_stream)
+        if max_per_user_per_stream > 0:
+            body["is_max_per_user_per_stream_enabled"] = True
+            body["max_per_user_per_stream"] = int(max_per_user_per_stream)
+
+        data = await self.helix(
+            "POST",
+            "/channel_points/custom_rewards",
+            params={"broadcaster_id": self.tokens.user_id},
+            json_body=body,
+        )
+        created = list(data.get("data", []))
+        if not created:
+            raise AuthError("Twitch accepted the reward but returned nothing.")
+        return created[0]
+
+    async def delete_reward(self, reward_id: str) -> None:
+        await self.helix(
+            "DELETE",
+            "/channel_points/custom_rewards",
+            params={"broadcaster_id": self.tokens.user_id, "id": reward_id},
+        )
+
+    async def close_redemption(self, reward_id: str, redemption_id: str, fulfilled: bool) -> bool:
+        """Mark a redemption fulfilled, or cancel it to refund the points.
+
+        Only works on rewards this application created - Twitch answers 403 for
+        anything made in the Twitch dashboard or by another app. That is not an
+        error worth interrupting a spin over, so it is reported and swallowed.
+        """
+        if not (reward_id and redemption_id and self.tokens.user_id):
+            return False
+        try:
+            await self.helix(
+                "PATCH",
+                "/channel_points/custom_rewards/redemptions",
+                params={
+                    "broadcaster_id": self.tokens.user_id,
+                    "reward_id": reward_id,
+                    "id": redemption_id,
+                },
+                json_body={"status": "FULFILLED" if fulfilled else "CANCELED"},
+            )
+            return True
+        except AuthError as exc:
+            log.info("Could not close redemption %s: %s", redemption_id, exc)
+            return False
 
     # ------------------------------------------------------------------ status
 

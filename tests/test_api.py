@@ -1,7 +1,9 @@
 """HTTP API behaviour, driven through the ASGI app directly."""
 
 import json
+import os
 import pathlib
+import re
 
 import httpx
 import pytest
@@ -404,3 +406,207 @@ async def test_a_token_saved_before_this_was_recorded_is_kept(monkeypatch):
     service.client_id = service._resolve_client_id()
     service.tokens = Tokens.load()
     assert service.tokens.valid, "a legacy token has no application recorded and must be kept"
+
+
+async def test_label_wrap_round_trips_and_defaults_on(client):
+    """Wrapping is the default: cutting words is worse than another line."""
+    made = (await client.post("/api/wheels", json={})).json()
+    assert made["appearance"]["label_wrap"] is True
+
+    made["appearance"]["label_wrap"] = False
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+    assert saved["appearance"]["label_wrap"] is False
+
+    from wheelhat.engine import render_payload
+
+    assert render_payload(db.get_wheel(made["id"]))["appearance"]["label_wrap"] is False
+
+
+def test_bake_script_round_trips_the_client_id(tmp_path, monkeypatch):
+    """The release build depends on this, and it only runs at tag time.
+
+    A rename of BUNDLED_CLIENT_ID must fail loudly rather than quietly ship an
+    executable with no application id in it.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "bake", pathlib.Path(__file__).resolve().parent.parent / "scripts" / "bake_client_id.py"
+    )
+    bake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bake)
+
+    target = tmp_path / "client_id.py"
+    target.write_text('X = 1\nBUNDLED_CLIENT_ID = ""\nY = 2\n', encoding="utf-8")
+    monkeypatch.setattr(bake, "TARGET", target)
+
+    bake.bake("abc123")
+    assert 'BUNDLED_CLIENT_ID = "abc123"' in target.read_text(encoding="utf-8")
+    # Surrounding code is untouched.
+    assert "X = 1" in target.read_text(encoding="utf-8")
+
+    # Baking twice replaces rather than appends.
+    bake.bake("def456")
+    body = target.read_text(encoding="utf-8")
+    assert body.count("BUNDLED_CLIENT_ID") == 1
+    assert 'BUNDLED_CLIENT_ID = "def456"' in body
+
+    bake.bake("")
+    assert 'BUNDLED_CLIENT_ID = ""' in target.read_text(encoding="utf-8")
+
+    # A renamed constant must stop the release, not pass silently.
+    target.write_text("RENAMED_CONSTANT = ''\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        bake.bake("abc123")
+
+
+def test_dotenv_fills_gaps_but_never_overrides_the_environment(tmp_path, monkeypatch):
+    """A .env is a convenience for source runs, not an authority.
+
+    The frozen bootstrap sets WHEELHAT_DATA_DIR before config is imported. If a
+    .env could override that, a stray file next to the executable would move
+    someone's wheels and tokens out from under them.
+    """
+    from wheelhat import config
+
+    (tmp_path / ".env").write_text(
+        "# a comment\n"
+        "\n"
+        "WHEELHAT_TWITCH_CLIENT_ID=fromdotenv\n"
+        'QUOTED_VALUE="quoted"\n'
+        "ALREADY_SET=from-the-file\n"
+        "malformed line with no equals\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("WHEELHAT_TWITCH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("QUOTED_VALUE", raising=False)
+    monkeypatch.setenv("ALREADY_SET", "from-the-shell")
+
+    config._load_dotenv()
+
+    assert os.environ["WHEELHAT_TWITCH_CLIENT_ID"] == "fromdotenv"
+    assert os.environ["QUOTED_VALUE"] == "quoted", "surrounding quotes should be stripped"
+    assert os.environ["ALREADY_SET"] == "from-the-shell", "the environment must win"
+
+
+def test_a_missing_or_unreadable_dotenv_is_not_fatal(tmp_path, monkeypatch):
+    """Starting up must not depend on a file that is optional by design."""
+    from wheelhat import config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path / "nowhere")
+    config._load_dotenv()  # must simply do nothing
+
+
+def test_no_native_append_can_render_the_text_null():
+    """Element.append() and replaceChildren() stringify anything that is not a
+    Node, so a null from a ternary is rendered as the literal text "null".
+
+    Our own h() filters those, which makes the native calls easy to reach for by
+    mistake - this has now happened twice. Any native call whose arguments can
+    produce null must spread a .filter(Boolean) list.
+    """
+    offenders = []
+    js_dir = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static" / "js"
+    for path in sorted(js_dir.glob("*.js")):
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"\.(append|replaceChildren)\(", source):
+            index, depth = match.end(), 1
+            while index < len(source) and depth:
+                depth += (source[index] == "(") - (source[index] == ")")
+                index += 1
+            args = source[match.end() : index - 1]
+            nullable = re.search(r":\s*null\b", args) or re.search(r"\?\?\s*null\b", args)
+            if nullable and "filter(Boolean)" not in args:
+                line = source[: match.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line} {match.group(1)}()")
+
+    assert not offenders, "these can render the text 'null': " + ", ".join(offenders)
+
+
+async def test_creating_a_reward_validates_before_calling_twitch(client):
+    """Twitch rejects these too, but a clear message beats a relayed HTTP error."""
+    blank = await client.post("/api/twitch/rewards", json={"title": "  ", "cost": 500})
+    assert blank.status_code == 422
+    assert "name" in blank.json()["detail"].lower()
+
+    free = await client.post("/api/twitch/rewards", json={"title": "Spin", "cost": 0})
+    assert free.status_code == 422
+    assert "1 point" in free.json()["detail"]
+
+
+async def test_creating_a_reward_keeps_redemptions_in_the_queue(monkeypatch):
+    """Skipping the queue would fulfil redemptions on arrival, which makes both
+    closing them after a spin and refunding a blocked one impossible."""
+    from wheelhat.twitch.service import TwitchService
+
+    sent: dict[str, object] = {}
+
+    async def fake_helix(self, method, path, *, params=None, json_body=None, _retried=False):
+        sent["method"], sent["path"] = method, path
+        sent["params"], sent["body"] = params, json_body
+        return {"data": [{"id": "reward-1", "title": json_body["title"]}]}
+
+    monkeypatch.setattr(TwitchService, "helix", fake_helix)
+    service = TwitchService()
+    service.tokens.user_id = "42"
+
+    created = await service.create_reward("Spin the wheel", 500, cooldown_seconds=30)
+
+    assert created["id"] == "reward-1"
+    assert sent["method"] == "POST"
+    assert sent["params"] == {"broadcaster_id": "42"}
+    assert sent["body"]["should_redemptions_skip_request_queue"] is False
+    assert sent["body"]["cost"] == 500
+    assert sent["body"]["is_global_cooldown_enabled"] is True
+    assert sent["body"]["global_cooldown_seconds"] == 30
+
+
+async def test_closing_a_redemption_sends_what_twitch_expects(monkeypatch):
+    from wheelhat.twitch.service import TwitchService
+
+    sent: dict[str, object] = {}
+
+    async def fake_helix(self, method, path, *, params=None, json_body=None, _retried=False):
+        sent["method"], sent["path"] = method, path
+        sent["params"], sent["body"] = params, json_body
+        return {}
+
+    monkeypatch.setattr(TwitchService, "helix", fake_helix)
+    service = TwitchService()
+    service.tokens.user_id = "42"
+
+    assert await service.close_redemption("r-1", "red-9", fulfilled=True) is True
+    assert sent["method"] == "PATCH"
+    assert sent["params"] == {"broadcaster_id": "42", "reward_id": "r-1", "id": "red-9"}
+    assert sent["body"] == {"status": "FULFILLED"}
+
+    await service.close_redemption("r-1", "red-9", fulfilled=False)
+    assert sent["body"] == {"status": "CANCELED"}
+
+
+async def test_a_reward_we_do_not_own_fails_quietly(monkeypatch):
+    """Twitch answers 403 for rewards created in its own dashboard. That must
+    not turn a successful spin into an error the streamer sees."""
+    from wheelhat.twitch.auth import AuthError
+    from wheelhat.twitch.service import TwitchService
+
+    async def fake_helix(self, *a, **k):
+        raise AuthError("custom reward was created by a different client_id")
+
+    monkeypatch.setattr(TwitchService, "helix", fake_helix)
+    service = TwitchService()
+    service.tokens.user_id = "42"
+
+    assert await service.close_redemption("r-1", "red-9", fulfilled=True) is False
+
+
+async def test_closing_needs_all_three_ids(monkeypatch):
+    from wheelhat.twitch.service import TwitchService
+
+    service = TwitchService()
+    service.tokens.user_id = "42"
+    assert await service.close_redemption("", "red-9", fulfilled=True) is False
+    assert await service.close_redemption("r-1", "", fulfilled=True) is False

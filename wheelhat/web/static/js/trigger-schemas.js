@@ -57,6 +57,21 @@ export const TRIGGER_TYPES = [
         placeholder: 'Spin the wheel',
         help: 'Used only when no reward is selected above - handy before you have signed in.',
       },
+      {
+        key: 'auto_close',
+        label: 'Close the redemption once the wheel has spun',
+        type: 'bool',
+        help:
+          'Marks it fulfilled in your queue instead of leaving it for you to clear. '
+          + 'Twitch only allows this for rewards WheelHat created - use "Create a reward" '
+          + 'on the Twitch page, since rewards made on Twitch itself cannot be closed by us.',
+      },
+      {
+        key: 'refund_on_failure',
+        label: 'Refund the points if the wheel could not spin',
+        type: 'bool',
+        help: 'Cancels the redemption when a cooldown or a disabled wheel blocks the spin.',
+      },
       ...COOLDOWN_FIELDS,
     ],
   },

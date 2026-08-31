@@ -245,14 +245,48 @@ async def _fire(wheel: Wheel, trigger: Trigger, data: dict[str, Any]) -> None:
             variables=_template_vars(data),
         )
         log.info("Trigger %s spun '%s' -> %s", trigger.type, wheel.name, result["winner"])
+        await _close_redemption(trigger, data, fulfilled=True)
     except SpinRejected as exc:
         log.info("Trigger %s could not spin '%s': %s", trigger.type, wheel.name, exc)
+        # The viewer paid for a spin that did not happen, so refund rather than
+        # leaving the redemption sitting unfulfilled in the queue.
+        await _close_redemption(trigger, data, fulfilled=False)
         await hub.broadcast_control(
             {
                 "type": "trigger_skipped",
                 "wheel_id": wheel.id,
                 "wheel_name": wheel.name,
                 "reason": str(exc),
+            }
+        )
+
+
+async def _close_redemption(trigger: Trigger, data: dict[str, Any], *, fulfilled: bool) -> None:
+    """Mark the redemption that caused this spin fulfilled, or refund it.
+
+    Off unless the trigger asks for it. Twitch only allows this for rewards the
+    application itself created, so it silently does nothing for a reward made in
+    the Twitch dashboard - which is why the editor offers to create one.
+    """
+    if trigger.type != "channel_points" or not trigger.config.get("auto_close"):
+        return
+    if fulfilled is False and not trigger.config.get("refund_on_failure", True):
+        return
+
+    from .twitch.service import twitch
+
+    closed = await twitch.close_redemption(
+        str(data.get("reward_id", "")),
+        str(data.get("redemption_id", "")),
+        fulfilled=fulfilled,
+    )
+    if closed:
+        await hub.broadcast_control(
+            {
+                "type": "redemption_closed",
+                "reward": data.get("reward", ""),
+                "user": data.get("user", ""),
+                "fulfilled": fulfilled,
             }
         )
 

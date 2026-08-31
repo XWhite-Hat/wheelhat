@@ -31,9 +31,18 @@ First release.
   first run can actually be diagnosed.
 - Switching Twitch application now signs the previous session out instead of
   leaving a stored token that reports as connected while every call fails.
-- Released builds carry their own Twitch application, so signing in no longer
-  starts with registering one. A client id can still be supplied to override it,
-  and clearing that field returns to the built-in application.
+- The Twitch page no longer renders a stray "null" beside the sign-in button.
+- WheelHat no longer opens an EventSub connection when no wheel has a trigger.
+  Twitch closes an unused socket with code 4003, so this was a permanent
+  connect/drop/retry loop rather than an idle connection.
+- Channel point rewards can be created from the Twitch page, so there is no
+  reward id to go and find.
+- Redemptions can be closed automatically once the wheel has spun, and refunded
+  when a cooldown or a disabled wheel blocks the spin. Twitch only permits this
+  for rewards WheelHat created.
+- Released builds carry their own Twitch application, so signing in is the
+  whole process - no registration, and no client id field to get past. Anyone
+  who has saved their own id still sees it and can clear it to go back.
 - Each wheel records the browser source size it is built for, with a
   recommended size that fits every element without cropping.
 - A frame image that reaches past the wheel is no longer cropped by the edge of
@@ -45,6 +54,9 @@ First release.
   wedges meet rather than both painting the shared edge.
 - Label colour, inline colour and label outline colour can be set per slice,
   each with an Auto switch that falls back to the wheel's own setting.
+- Labels wrap onto up to three lines and shrink to fit rather than being cut
+  short, measured against both the room between the rim and the hub and the
+  width of the wedge itself. Wrapping can be turned off for one line per wedge.
 - Text and other decorations scale with the wheel, so a label that fits one
   browser source fits at any size - and the editor preview matches the overlay.
 - A browser source that connects mid-spin animates the rest of the spin and

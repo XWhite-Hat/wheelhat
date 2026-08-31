@@ -12,6 +12,39 @@ PROJECT_ROOT = PACKAGE_DIR.parent
 WEB_DIR = PACKAGE_DIR / "web"
 
 
+def _load_dotenv() -> None:
+    """Read a .env beside the project, so a source run needs no shell setup.
+
+    Deliberately not python-dotenv: this is a handful of lines and the frozen
+    build should not carry a dependency for a development convenience.
+
+    Anything already in the environment wins. That matters more than it looks:
+    the frozen bootstrap sets WHEELHAT_DATA_DIR before this module is imported,
+    and a stray .env must never be able to move someone's data folder out from
+    under them. It also means an explicit variable on the command line still
+    beats the file, which is what anyone would expect.
+    """
+    for candidate in (PROJECT_ROOT / ".env", Path.cwd() / ".env"):
+        try:
+            if not candidate.is_file():
+                continue
+            for line in candidate.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if not key or key in os.environ:
+                    continue
+                os.environ[key] = value.strip().strip("\"'")
+        except OSError:
+            # An unreadable .env is not worth failing to start over.
+            continue
+
+
+_load_dotenv()
+
+
 def _default_data_dir() -> Path:
     """Store data next to the project in dev, or in the OS app-data dir once installed."""
     if (PROJECT_ROOT / "pyproject.toml").exists():

@@ -208,3 +208,191 @@ async def test_per_user_cooldown_still_lets_another_viewer_through():
     await triggers.handle_twitch_event(REDEEM, other)
     await engine.wait_for(wheel.id)
     assert len(db.list_spins(wheel.id)) == 2
+
+
+# ------------------------------------------------------- closing redemptions
+
+
+class FakeTwitch:
+    """Records what would have been sent to Twitch."""
+
+    def __init__(self, succeeds: bool = True) -> None:
+        self.calls: list[tuple[str, str, bool]] = []
+        self.succeeds = succeeds
+
+    async def close_redemption(self, reward_id: str, redemption_id: str, fulfilled: bool) -> bool:
+        self.calls.append((reward_id, redemption_id, fulfilled))
+        return self.succeeds
+
+
+def redemption_data():
+    return {
+        "trigger_type": "channel_points",
+        "reward_id": "r-1",
+        "redemption_id": "red-9",
+        "reward": "Spin the wheel",
+        "user": "Viewer",
+    }
+
+
+async def test_a_spin_fulfils_the_redemption_when_asked(monkeypatch):
+    """Otherwise every spin leaves an entry in the streamer's queue to clear."""
+    fake = FakeTwitch()
+    monkeypatch.setattr("wheelhat.twitch.service.twitch", fake)
+    trigger = Trigger(type="channel_points", config={"reward_id": "r-1", "auto_close": True})
+
+    await triggers._close_redemption(trigger, redemption_data(), fulfilled=True)
+    assert fake.calls == [("r-1", "red-9", True)]
+
+
+async def test_a_blocked_spin_refunds_the_viewer(monkeypatch):
+    """They paid for a spin that never happened."""
+    fake = FakeTwitch()
+    monkeypatch.setattr("wheelhat.twitch.service.twitch", fake)
+    trigger = Trigger(type="channel_points", config={"reward_id": "r-1", "auto_close": True})
+
+    await triggers._close_redemption(trigger, redemption_data(), fulfilled=False)
+    assert fake.calls == [("r-1", "red-9", False)]
+
+
+async def test_refunds_can_be_turned_off_while_fulfilment_stays_on(monkeypatch):
+    fake = FakeTwitch()
+    monkeypatch.setattr("wheelhat.twitch.service.twitch", fake)
+    trigger = Trigger(
+        type="channel_points",
+        config={"reward_id": "r-1", "auto_close": True, "refund_on_failure": False},
+    )
+
+    await triggers._close_redemption(trigger, redemption_data(), fulfilled=False)
+    assert fake.calls == []
+    await triggers._close_redemption(trigger, redemption_data(), fulfilled=True)
+    assert fake.calls == [("r-1", "red-9", True)]
+
+
+async def test_nothing_is_closed_unless_the_trigger_asks(monkeypatch):
+    """Off by default: closing someone's redemptions uninvited is not ours to do."""
+    fake = FakeTwitch()
+    monkeypatch.setattr("wheelhat.twitch.service.twitch", fake)
+    trigger = Trigger(type="channel_points", config={"reward_id": "r-1"})
+
+    await triggers._close_redemption(trigger, redemption_data(), fulfilled=True)
+    assert fake.calls == []
+
+
+async def test_only_channel_point_triggers_close_anything(monkeypatch):
+    """A cheer or a follow has no redemption behind it."""
+    fake = FakeTwitch()
+    monkeypatch.setattr("wheelhat.twitch.service.twitch", fake)
+    trigger = Trigger(type="cheer", config={"auto_close": True})
+
+    await triggers._close_redemption(trigger, redemption_data(), fulfilled=True)
+    assert fake.calls == []
+
+
+# ------------------------------------------------- eventsub connection policy
+
+
+class FakeEventSub:
+    """Tracks start/stop without opening a socket."""
+
+    def __init__(self) -> None:
+        self.session_id = ""
+        self.running = False
+        self.starts = 0
+        self.stops = 0
+
+    async def start(self) -> None:
+        self.starts += 1
+        self.running = True
+
+    async def stop(self) -> None:
+        self.stops += 1
+        self.running = False
+        self.session_id = ""
+
+
+async def test_no_eventsub_socket_when_nothing_listens(monkeypatch):
+    """Twitch closes a socket with no subscriptions after ~10s, code 4003.
+
+    Connecting with no triggers configured does not idle - it becomes a
+    permanent connect/drop/retry loop against Twitch.
+    """
+    from wheelhat.twitch.service import TwitchService
+
+    service = TwitchService()
+    fake = FakeEventSub()
+    service._eventsub = fake
+    service.tokens.user_id = "42"
+
+    # A wheel with no triggers at all.
+    db.save_wheel(Wheel(name="Quiet", slices=[Slice(id="sl_1", label="One")]))
+    assert service.needed_subscription_types() == []
+
+    await service.sync_eventsub()
+    assert fake.starts == 0, "should not open a socket with nothing to subscribe to"
+
+
+async def test_the_socket_opens_once_a_trigger_needs_it(monkeypatch):
+    from wheelhat.twitch.service import TwitchService
+
+    service = TwitchService()
+    fake = FakeEventSub()
+    service._eventsub = fake
+    service.tokens.user_id = "42"
+
+    db.save_wheel(
+        Wheel(
+            name="Listening",
+            slices=[Slice(id="sl_1", label="One")],
+            triggers=[Trigger(type="channel_points", config={"reward_id": "r-1"})],
+        )
+    )
+    assert service.needed_subscription_types() != []
+
+    await service.sync_eventsub()
+    assert fake.starts == 1
+
+
+async def test_the_socket_closes_when_the_last_trigger_goes(monkeypatch):
+    """Otherwise removing your only trigger leaves the 4003 loop running."""
+    from wheelhat.twitch.service import TwitchService
+
+    service = TwitchService()
+    fake = FakeEventSub()
+    service._eventsub = fake
+    service.tokens.user_id = "42"
+
+    wheel = db.save_wheel(
+        Wheel(
+            name="Listening",
+            slices=[Slice(id="sl_1", label="One")],
+            triggers=[Trigger(type="channel_points", config={"reward_id": "r-1"})],
+        )
+    )
+    await service.sync_eventsub()
+    assert fake.running is True
+
+    wheel.triggers = []
+    db.save_wheel(wheel)
+    await service.sync_eventsub()
+    assert fake.stops == 1
+    assert fake.running is False
+
+
+async def test_a_disabled_trigger_does_not_hold_the_socket_open(monkeypatch):
+    from wheelhat.twitch.service import TwitchService
+
+    service = TwitchService()
+    fake = FakeEventSub()
+    service._eventsub = fake
+    service.tokens.user_id = "42"
+
+    db.save_wheel(
+        Wheel(
+            name="Off",
+            slices=[Slice(id="sl_1", label="One")],
+            triggers=[Trigger(type="channel_points", enabled=False, config={"reward_id": "r-1"})],
+        )
+    )
+    await service.sync_eventsub()
+    assert fake.starts == 0

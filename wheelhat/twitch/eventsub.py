@@ -45,6 +45,11 @@ class EventSubClient:
         self._want_running = False
         self._seen: dict[str, float] = {}
 
+    @property
+    def running(self) -> bool:
+        """Whether a connection is wanted, connected or not."""
+        return self._want_running
+
     async def start(self) -> None:
         if self._task and not self._task.done():
             return

@@ -824,7 +824,12 @@ export async function renderWheelEditor(main, wheelId) {
           field('Font family', h('input', { type: 'text', value: a.font_family, oninput: bind('font_family') })),
           field('Label size', h('input', { type: 'number', min: 8, max: 64, value: a.font_size, oninput: bind('font_size', Number) })),
           field('Label weight', h('input', { type: 'number', min: 300, max: 900, step: 100, value: a.font_weight, oninput: bind('font_weight', Number) })),
-          field('Trim labels after N characters', h('input', { type: 'number', min: 6, max: 60, value: a.label_max_chars, oninput: bind('label_max_chars', Number) })),
+          field(
+            'Trim labels after N characters',
+            h('input', { type: 'number', min: 6, max: 60, value: a.label_max_chars, oninput: bind('label_max_chars', Number) }),
+            'Only used when wrapping is off. With wrapping on, labels are measured '
+              + 'and sized to fit instead of being counted.'
+          ),
           field('Rim thickness', h('input', { type: 'number', min: 0, max: 40, value: a.rim_width, oninput: bind('rim_width', Number) }))
         )
       ),
@@ -858,6 +863,7 @@ export async function renderWheelEditor(main, wheelId) {
         h('h2', 'Label style'),
         h(
           'div.grid.two',
+          switchField('Wrap long labels onto more lines', a.label_wrap !== false, bind('label_wrap')),
           switchField('Curve labels around the wheel', a.text_curved, bind('text_curved')),
           switchField('UPPERCASE labels', a.text_uppercase, bind('text_uppercase')),
           switchField('Label shadow', a.text_shadow, bind('text_shadow')),

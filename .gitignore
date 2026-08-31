@@ -1,3 +1,6 @@
+# Local settings, read at startup by wheelhat/config.py
+.env
+
 # Virtual environments
 .venv/
 venv/

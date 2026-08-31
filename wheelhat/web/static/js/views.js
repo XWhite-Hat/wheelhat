@@ -447,10 +447,14 @@ export async function renderTwitch(main) {
     }
     if (!status.signed_in) {
       body.appendChild(signInCard(status));
-      body.appendChild(clientIdCard(status, true));
+      // Nothing to configure when the build brings its own application - the
+      // only thing to do is connect. The card comes back for anyone who has
+      // saved their own id, so they can still see and clear it.
+      if (!status.using_bundled_client_id) body.appendChild(clientIdCard(status, true));
       return;
     }
     body.appendChild(signedInCard(status));
+    body.appendChild(rewardsCard());
     body.appendChild(subscriptionsCard(status));
     body.appendChild(testCard());
   };
@@ -542,23 +546,32 @@ function signInCard(status) {
       )
     );
   } else {
+    // append() renders a null argument as the text "null", so drop empty slots
+    // before handing them over - h() filters them, this does not.
     box.append(
-      h('p.card-hint', 'WheelHat will show you a short code to enter on twitch.tv. Nothing is typed into this app.'),
-      status.flow_error ? h('div.test-result.bad', { style: { marginBottom: '12px' } }, status.flow_error) : null,
-      h(
-        'button.btn.primary',
-        {
-          onclick: guard(async () => {
-            await api.post('/twitch/login');
-            toast('Enter the code shown on this page at twitch.tv/activate', 'info', 8000);
-          }),
-        },
-        'Sign in with Twitch'
-      )
+      ...[
+        h('p.card-hint', 'WheelHat will show you a short code to enter on twitch.tv. Nothing is typed into this app.'),
+        status.flow_error ? h('div.test-result.bad', { style: { marginBottom: '12px' } }, status.flow_error) : null,
+        h(
+          'button.btn.primary',
+          {
+            onclick: guard(async () => {
+              await api.post('/twitch/login');
+              toast('Enter the code shown on this page at twitch.tv/activate', 'info', 8000);
+            }),
+          },
+          'Sign in with Twitch'
+        ),
+      ].filter(Boolean)
     );
   }
 
-  return h('div.card', h('h2', 'Step 2 — connect your account'), box);
+  // "Step 2" only makes sense when there is a step 1. A released build signs in
+  // through its own application, so connecting is the whole process.
+  const heading = status.using_bundled_client_id
+    ? 'Connect your Twitch account'
+    : 'Step 2 — connect your account';
+  return h('div.card', h('h2', heading), box);
 }
 
 function signedInCard(status) {
@@ -630,6 +643,106 @@ function signedInCard(status) {
           },
         },
         'Sign out'
+      )
+    )
+  );
+}
+
+/**
+ * Create and manage the channel point rewards WheelHat owns.
+ *
+ * Two reasons this exists rather than sending people to Twitch: it saves anyone
+ * having to go and find a reward id, and a reward created here belongs to
+ * WheelHat - which is the only way Twitch will let it close the redemption once
+ * the wheel has spun. Rewards made on Twitch itself can trigger a wheel, but
+ * their redemptions can never be marked fulfilled from here.
+ */
+function rewardsCard() {
+  const list = h('div.muted', 'Loading…');
+  const title = h('input', { type: 'text', placeholder: 'Spin the wheel', maxlength: 45 });
+  const cost = h('input', { type: 'number', min: 1, step: 50, value: 500 });
+  const prompt = h('input', { type: 'text', placeholder: 'Shown to viewers when they redeem' });
+  const cooldown = h('input', { type: 'number', min: 0, step: 5, value: 0 });
+
+  const refresh = async () => {
+    try {
+      const { rewards } = await api.get('/twitch/rewards?manageable=1');
+      clear(list);
+      if (!rewards.length) {
+        list.appendChild(h('div.muted', 'None yet. Create one below and pick it on a wheel’s trigger.'));
+        return;
+      }
+      for (const reward of rewards) {
+        list.appendChild(
+          h(
+            'div.log-row',
+            h('span.what', h('strong', reward.title), ` — ${reward.cost} points`),
+            h('span.grow'),
+            h(
+              'button.btn.small.ghost',
+              {
+                onclick: guard(async () => {
+                  if (!(await confirmDialog(`Delete the reward "${reward.title}" on Twitch?`))) return;
+                  await api.del(`/twitch/rewards/${reward.id}`);
+                  toast('Reward deleted', 'ok');
+                  await refresh();
+                }),
+              },
+              'Delete'
+            )
+          )
+        );
+      }
+    } catch (err) {
+      clear(list);
+      list.appendChild(h('div.test-result.bad', err.message));
+    }
+  };
+
+  refresh();
+
+  return h(
+    'div.card',
+    h('h2', 'Channel point rewards'),
+    h(
+      'p.card-hint',
+      'Rewards created here belong to WheelHat, so it can mark redemptions fulfilled '
+        + 'once the wheel has spun. A reward you made on Twitch can still trigger a wheel, '
+        + 'but Twitch will not let WheelHat close its redemptions.'
+    ),
+    list,
+    h('div', { style: { marginTop: '16px' } }),
+    h(
+      'div.grid.two',
+      h('div.field', h('label', 'Name'), title),
+      h('div.field', h('label', 'Cost in points'), cost),
+      h('div.field', h('label', 'Prompt (optional)'), prompt),
+      h('div.field', h('label', 'Cooldown in seconds (0 = none)'), cooldown)
+    ),
+    h(
+      'div.row',
+      { style: { marginTop: '12px' } },
+      h(
+        'button.btn.primary',
+        {
+          onclick: guard(async () => {
+            if (!title.value.trim()) {
+              toast('Give the reward a name', 'bad');
+              return;
+            }
+            await api.post('/twitch/rewards', {
+              title: title.value.trim(),
+              cost: Number(cost.value) || 1,
+              prompt: prompt.value.trim(),
+              cooldown_seconds: Number(cooldown.value) || 0,
+            });
+            toast('Reward created on your channel', 'ok');
+            title.value = '';
+            prompt.value = '';
+            await refresh();
+          }),
+        },
+        'Create the reward'
       )
     )
   );

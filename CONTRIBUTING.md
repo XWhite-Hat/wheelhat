@@ -21,7 +21,7 @@ it in the desktop shell afterwards.
 
 ```bash
 .venv\Scripts\python -m ruff check .      # rules live in pyproject.toml
-.venv\Scripts\python -m pytest -q         # 216 tests, about 35 seconds
+.venv\Scripts\python -m pytest -q         # 235 tests, about 35 seconds
 ```
 
 CI runs the same two commands on Windows and Linux across Python 3.10 to 3.13,
@@ -119,3 +119,28 @@ not `AuthenticationError: 4009`.
 Include the WheelHat version (Settings page), your OS, which apps you had
 connected, and anything from the Activity page. If it involves an integration,
 say which version of that app you are running.
+
+## Local settings
+
+Copy `.env.example` to `.env` for a source run — it is read at startup and is
+never committed. Anything already set in your shell wins over the file, so an
+explicit variable on the command line still takes precedence.
+
+The most useful entries are `WHEELHAT_TWITCH_CLIENT_ID`, so a source build does
+not ask for a Twitch application, and `WHEELHAT_DATA_DIR`, to work against your
+real wheels instead of the empty `data/` beside the project.
+
+## Building an executable that behaves like a release
+
+A build from source carries no Twitch application id, so it asks the user for
+one. To produce a local executable that behaves like a downloaded release:
+
+```
+python scripts/bake_client_id.py <client-id>
+pyinstaller build/wheelhat.spec --noconfirm --clean --distpath dist --workpath build/work
+python scripts/bake_client_id.py --clear
+```
+
+The same script runs in the release workflow, so a local build and a released
+one are built the same way. It edits a tracked file, hence the `--clear`; a test
+fails if a client id is ever committed.

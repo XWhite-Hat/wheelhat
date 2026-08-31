@@ -121,6 +121,13 @@ separated segments, a centre hole to make it a ring, shading towards the hub,
 wedge inlines, and label controls — curved text that follows the wedge,
 uppercase, outline, shadow, and how far out the label sits.
 
+Long labels **wrap onto up to three lines and shrink to fit** rather than being
+cut short. The fit is measured both ways: each line has to fit between the rim
+and the hub, and the block has to fit inside the wedge — so on a busy wheel with
+thin wedges a label drops back to one smaller line instead of cramming. Turn
+wrapping off for strictly one line per wedge, in which case *Trim labels after N
+characters* applies instead.
+
 Wedge borders are drawn as **inlines**, inside each wedge rather than centred on
 its edge. Two neighbouring wedges therefore meet inline-to-inline instead of both
 painting the shared edge, which would otherwise leave it thicker than the outer
@@ -326,8 +333,8 @@ scopes and the device code. So the field has to be filled in and is then never
 used; `http://localhost` is the usual filler. Only the **client type** matters: it has
 to be *Public*, which is the type Twitch recommends for desktop apps anyway.
 
-Builds from source carry no application id, so they ask for one — set
-`WHEELHAT_TWITCH_CLIENT_ID` or save it in the app.
+Builds from source carry no application id, so they ask for one. Save it in
+the app, or copy `.env.example` to `.env` and set `WHEELHAT_TWITCH_CLIENT_ID`.
 
 **No Twitch registration at all.** If you already run Streamer.bot, Mix It Up,
 Firebot or SAMMI, they hold your Twitch authentication already. Point a channel
@@ -337,6 +344,23 @@ to connect WheelHat to Twitch.
 
 WheelHat only subscribes to the EventSub topics your wheels actually use — add a
 bits trigger and it starts listening for bits, not before.
+
+### Channel point rewards
+
+The Twitch page can **create rewards on your channel**, so you never have to go
+looking for a reward id — create one, then pick it from the dropdown on a
+wheel's trigger.
+
+Rewards created in WheelHat can also be **closed automatically**: tick *Close the
+redemption once the wheel has spun* on the trigger and the redemption is marked
+fulfilled instead of sitting in your queue. If the spin is blocked — a cooldown,
+a disabled wheel — the redemption is cancelled instead, refunding the viewer.
+
+This only works for rewards WheelHat created. Twitch restricts closing
+redemptions to the application that made the reward, so one you created on
+Twitch itself can still *trigger* a wheel, but its redemptions cannot be closed
+from here. That restriction is per application, so a reward created by any
+WheelHat install can be managed by any other.
 
 There is a **Simulate a redemption** button on the Twitch page so you can test
 the whole chain without going live.
@@ -431,7 +455,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 216 tests
+.venv\Scripts\python -m pytest          # 235 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

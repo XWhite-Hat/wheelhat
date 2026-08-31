@@ -23,6 +23,17 @@ class ChatPayload(BaseModel):
     message: str
 
 
+class RewardPayload(BaseModel):
+    title: str
+    cost: int = 1000
+    prompt: str = ""
+    background_color: str = ""
+    user_input: bool = False
+    cooldown_seconds: int = 0
+    max_per_stream: int = 0
+    max_per_user_per_stream: int = 0
+
+
 class SimulatePayload(BaseModel):
     """Fire a synthetic Twitch event so triggers can be tested off-stream."""
 
@@ -57,11 +68,49 @@ async def logout() -> dict[str, Any]:
 
 
 @router.get("/rewards")
-async def rewards() -> dict[str, Any]:
+async def rewards(manageable: bool = False) -> dict[str, Any]:
+    """The channel's rewards. `manageable` limits it to the ones WheelHat made,
+    which are the only ones whose redemptions Twitch lets it close."""
     try:
-        return {"rewards": await twitch.list_rewards()}
+        return {"rewards": await twitch.list_rewards(manageable_only=manageable)}
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/rewards", status_code=201)
+async def create_reward(payload: RewardPayload) -> dict[str, Any]:
+    """Create a reward so nobody has to go and find a reward id.
+
+    A reward made here belongs to WheelHat, which is also what makes closing
+    its redemptions possible - Twitch refuses that for rewards created
+    anywhere else.
+    """
+    if not payload.title.strip():
+        raise HTTPException(status_code=422, detail="The reward needs a name.")
+    if payload.cost < 1:
+        raise HTTPException(status_code=422, detail="A reward has to cost at least 1 point.")
+    try:
+        return {"reward": await twitch.create_reward(
+            payload.title,
+            payload.cost,
+            prompt=payload.prompt,
+            background_color=payload.background_color,
+            user_input=payload.user_input,
+            cooldown_seconds=payload.cooldown_seconds,
+            max_per_stream=payload.max_per_stream,
+            max_per_user_per_stream=payload.max_per_user_per_stream,
+        )}
+    except AuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/rewards/{reward_id}")
+async def delete_reward(reward_id: str) -> dict[str, Any]:
+    try:
+        await twitch.delete_reward(reward_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": reward_id}
 
 
 @router.post("/resubscribe")
