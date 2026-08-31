@@ -54,6 +54,12 @@ const DEFAULT_APPEARANCE = {
   font_weight: 700,
   label_max_chars: 22,
   label_wrap: true,
+  shadow_enabled: true,
+  shadow_color: '#000000',
+  shadow_opacity: 0.45,
+  shadow_blur: 45,
+  shadow_offset_x: 0,
+  shadow_offset_y: 18,
   idle_spin_speed: 0,
 
   wedge_gap: 0,
@@ -113,6 +119,41 @@ export function wheelRadius(size, appearance, scale) {
   const headroom = frameHeadroom(appearance);
   const rim = (appearance.rim_width || 0) * scale;
   return (size / 2 - 6 * scale - rim * headroom.scale) / (headroom.scale + headroom.offset);
+}
+
+/**
+ * The wheel's drop shadow, as a CSS filter value.
+ *
+ * A CSS filter rather than a canvas shadow on purpose: drop-shadow() works from
+ * the rendered alpha, so a wheel with a centre hole or gaps between its wedges
+ * casts the shadow of that shape. A canvas shadow would fill the hole in.
+ *
+ * Sizes are px at REFERENCE_SIZE and scale with the wheel, so the same setting
+ * looks the same on a 400px source and a 1080px one.
+ */
+export function shadowFilter(appearance = {}, size = REFERENCE_SIZE) {
+  if (appearance.shadow_enabled === false) return 'none';
+  const scale = Math.max(size, 1) / REFERENCE_SIZE;
+  const blur = Math.max(0, Number(appearance.shadow_blur ?? 45)) * scale;
+  const x = Number(appearance.shadow_offset_x ?? 0) * scale;
+  const y = Number(appearance.shadow_offset_y ?? 18) * scale;
+  const opacity = clamp(appearance.shadow_opacity ?? 0.45, 0, 1);
+  if (blur <= 0 && x === 0 && y === 0) return 'none';
+  if (opacity <= 0) return 'none';
+  const colour = withAlpha(appearance.shadow_color || '#000000', opacity);
+  return `drop-shadow(${x.toFixed(1)}px ${y.toFixed(1)}px ${blur.toFixed(1)}px ${colour})`;
+}
+
+/** #rrggbb plus an opacity, as rgba(). Anything else is passed through. */
+function withAlpha(colour, opacity) {
+  const hex = String(colour).trim();
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return hex;
+  const value = parseInt(match[1], 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
 /** The browser source size that fits this wheel with nothing cropped. */

@@ -454,7 +454,7 @@ export async function renderTwitch(main) {
       return;
     }
     body.appendChild(signedInCard(status));
-    body.appendChild(rewardsCard());
+    body.appendChild(rewardsCard(status));
     body.appendChild(subscriptionsCard(status));
     body.appendChild(testCard());
   };
@@ -657,7 +657,7 @@ function signedInCard(status) {
  * the wheel has spun. Rewards made on Twitch itself can trigger a wheel, but
  * their redemptions can never be marked fulfilled from here.
  */
-function rewardsCard() {
+function rewardsCard(status) {
   const list = h('div.muted', 'Loading…');
   const title = h('input', { type: 'text', placeholder: 'Spin the wheel', maxlength: 45 });
   const cost = h('input', { type: 'number', min: 1, step: 50, value: 500 });
@@ -698,6 +698,37 @@ function rewardsCard() {
       list.appendChild(h('div.test-result.bad', err.message));
     }
   };
+
+  // Channel points and bits only exist on affiliate and partner channels.
+  // Offering a create form that Twitch will refuse is worse than saying so and
+  // pointing at the thing that does work everywhere.
+  if (status && status.has_channel_points === false) {
+    return h(
+      'div.card',
+      h('h2', 'Channel point rewards'),
+      h(
+        'p.card-hint',
+        'Channel points and bits are only available on affiliate and partner channels, '
+          + 'so there are no rewards to create here yet. Nothing is broken — WheelHat '
+          + 'is connected and working.'
+      ),
+      h(
+        'p.card-hint',
+        'Until then, drive your wheels from chat: add a '
+          + 'Chat command trigger to a wheel, set it to something like !spin, and choose '
+          + 'who is allowed to use it. It works on any channel, and you can restrict it '
+          + 'to subscribers, VIPs or moderators.'
+      ),
+      h(
+        'div.row',
+        h(
+          'a.btn.ghost',
+          { href: 'https://help.twitch.tv/s/article/joining-the-affiliate-program', target: '_blank', rel: 'noreferrer' },
+          'About the Affiliate Programme'
+        )
+      )
+    );
+  }
 
   refresh();
 
@@ -748,15 +779,45 @@ function rewardsCard() {
   );
 }
 
+const SUBSCRIPTION_LABELS = {
+  'channel.channel_points_custom_reward_redemption.add': 'Channel point redemptions',
+  'channel.chat.message': 'Chat messages',
+  'channel.cheer': 'Bits cheered',
+  'channel.subscribe': 'New subscriptions',
+  'channel.subscription.gift': 'Gifted subscriptions',
+  'channel.subscription.message': 'Resubscriptions',
+  'channel.follow': 'New followers',
+  'channel.raid': 'Raids',
+  'stream.online': 'Going live',
+};
+
 function subscriptionsCard(status) {
   const subs = status.subscriptions || [];
+  const always = subs.filter((sub) => sub.baseline);
+  const fromTriggers = subs.filter((sub) => !sub.baseline);
+  const pill = (sub) => h('span.pill.good', SUBSCRIPTION_LABELS[sub.type] || sub.type);
+
   return h(
     'div.card',
     h('h2', 'Event subscriptions'),
-    h('p.card-hint', 'WheelHat only subscribes to the events your wheels actually use. Add a trigger to a wheel and it will appear here.'),
-    subs.length
-      ? h('div.row.wrap', subs.map((sub) => h('span.pill.good', sub.type)))
-      : h('p.muted', 'No subscriptions yet.'),
+    h(
+      'p.card-hint',
+      'Channel point redemptions are picked up as soon as you sign in, so every '
+        + 'reward on your channel is seen whether or not a wheel is using it yet. '
+        + 'Everything else is added as your wheels need it.'
+    ),
+    always.length
+      ? h('div.field', h('label', 'Always on'), h('div.row.wrap', always.map(pill)))
+      : null,
+    fromTriggers.length
+      ? h(
+          'div.field',
+          { style: { marginTop: '12px' } },
+          h('label', 'Added by your wheels'),
+          h('div.row.wrap', fromTriggers.map(pill))
+        )
+      : null,
+    !subs.length ? h('p.muted', 'Nothing subscribed yet.') : null,
     status.subscription_errors?.length
       ? h(
           'div',

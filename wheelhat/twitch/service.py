@@ -62,7 +62,29 @@ SUBSCRIPTION_SPECS: dict[str, dict[str, Any]] = {
         "condition": ["to_broadcaster_user_id"],
         "scope": "",
     },
+    "stream.online": {
+        "version": "1",
+        "condition": ["broadcaster_user_id"],
+        "scope": "",
+    },
 }
+
+#: Subscribed to whenever signed in, whether or not any wheel wants them.
+#:
+#: Without these the connection sits closed until someone adds a trigger, and
+#: the Twitch page reads "disconnected" straight after a successful sign-in -
+#: which looks like the sign-in failed.
+#:
+#: Channel points first, because it is what most wheels end up using, so the
+#: subscription is already in place by the time a trigger is added. It needs
+#: affiliate status though: a channel without channel points has that request
+#: refused. stream.online needs no scope and exists on every channel, so there
+#: is always at least one live subscription and Twitch never closes the socket
+#: as unused.
+BASELINE_SUBSCRIPTIONS: list[str] = [
+    "channel.channel_points_custom_reward_redemption.add",
+    "stream.online",
+]
 
 # Which EventSub types each wheel trigger kind needs.
 TRIGGER_SUBSCRIPTIONS: dict[str, list[str]] = {
@@ -86,6 +108,9 @@ class TwitchService:
         self.flow: Optional[DeviceFlow] = None
         self.flow_error: str = ""
         self.subscriptions: list[dict[str, Any]] = []
+        #: Set only while someone is deliberately identifying a reward.
+        self._capture_until: float = 0.0
+        self._captured: Optional[dict[str, Any]] = None
         self.sub_errors: list[str] = []
 
         self._flow_task: Optional[asyncio.Task] = None
@@ -248,6 +273,12 @@ class TwitchService:
                 await asyncio.sleep(300)
 
     async def _fetch_display_name(self, tokens: Tokens) -> str:
+        """Display name, and the channel type, from the same request.
+
+        broadcaster_type comes back here for free. Knowing whether a channel is
+        affiliate or partner is what lets WheelHat point a regular channel at
+        chat commands instead of offering channel points it cannot have.
+        """
         response = await client().get(
             f"{config.TWITCH_HELIX_URL}/users",
             headers={
@@ -258,7 +289,10 @@ class TwitchService:
         if response.status_code != 200:
             return tokens.login
         data = response.json().get("data", [])
-        return data[0].get("display_name", tokens.login) if data else tokens.login
+        if not data:
+            return tokens.login
+        tokens.broadcaster_type = str(data[0].get("broadcaster_type", "") or "")
+        return data[0].get("display_name", tokens.login)
 
     # ------------------------------------------------------------------- helix
 
@@ -340,7 +374,7 @@ class TwitchService:
     # --------------------------------------------------------------- eventsub
 
     def needed_subscription_types(self) -> list[str]:
-        """Only subscribe to what the configured wheels actually listen for."""
+        """What the configured wheels actually listen for."""
         wanted: set[str] = set()
         for wheel in db.list_wheels():
             for trigger in wheel.triggers:
@@ -348,6 +382,20 @@ class TwitchService:
                     continue
                 wanted.update(TRIGGER_SUBSCRIPTIONS.get(trigger.type, []))
         return sorted(wanted)
+
+    @property
+    def has_channel_points(self) -> bool:
+        """Affiliate and partner channels only. Regular channels have neither
+        channel points nor bits, so wheels there are driven from chat."""
+        return self.tokens.broadcaster_type in {"affiliate", "partner"}
+
+    def all_subscription_types(self) -> list[str]:
+        """Everything to subscribe to: the baseline, plus whatever wheels want."""
+        baseline = set(BASELINE_SUBSCRIPTIONS)
+        if not self.has_channel_points:
+            # Asking for it would just be refused on every reconnect.
+            baseline.discard("channel.channel_points_custom_reward_redemption.add")
+        return sorted(baseline | set(self.needed_subscription_types()))
 
     async def _on_session(self, session_id: str) -> None:
         await self.subscribe_all(session_id)
@@ -365,7 +413,7 @@ class TwitchService:
         task, so calling this from _on_session would cancel the task from within
         itself.
         """
-        if self.needed_subscription_types():
+        if self.tokens.valid and self.all_subscription_types():
             await self._eventsub.start()  # no-op when already running
             return
         if self._eventsub.session_id or self._eventsub.running:
@@ -390,18 +438,24 @@ class TwitchService:
             return
 
         existing = await self._existing_subscription_types(session_id)
-        for sub_type in self.needed_subscription_types():
+        needed = set(self.needed_subscription_types())
+        for sub_type in self.all_subscription_types():
             if sub_type in existing:
-                self.subscriptions.append({"type": sub_type, "status": "enabled"})
+                self.subscriptions.append(
+                    {"type": sub_type, "status": "enabled", "baseline": sub_type not in needed}
+                )
                 continue
             spec = SUBSCRIPTION_SPECS.get(sub_type)
             if spec is None:
                 continue
             scope = spec["scope"]
             if scope and scope not in self.tokens.scopes:
-                self.sub_errors.append(
-                    f"{sub_type} needs the '{scope}' scope - sign in again to grant it."
-                )
+                if sub_type in needed:
+                    self.sub_errors.append(
+                        f"{sub_type} needs the '{scope}' scope - sign in again to grant it."
+                    )
+                else:
+                    log.info("Skipping baseline %s: missing the '%s' scope", sub_type, scope)
                 continue
             condition = dict.fromkeys(spec["condition"], broadcaster)
             # user_id / moderator_user_id are "who is watching", also us.
@@ -416,10 +470,19 @@ class TwitchService:
                         "transport": {"method": "websocket", "session_id": session_id},
                     },
                 )
-                self.subscriptions.append({"type": sub_type, "status": "enabled"})
+                self.subscriptions.append(
+                    {"type": sub_type, "status": "enabled", "baseline": sub_type not in needed}
+                )
             except Exception as exc:  # noqa: BLE001
-                self.sub_errors.append(f"{sub_type}: {exc}")
-                log.warning("EventSub subscribe failed for %s: %s", sub_type, exc)
+                if sub_type in needed:
+                    self.sub_errors.append(f"{sub_type}: {exc}")
+                    log.warning("EventSub subscribe failed for %s: %s", sub_type, exc)
+                else:
+                    # A baseline subscription nobody asked for. Channel points
+                    # are refused on a channel without affiliate status, and
+                    # reporting that as an error to someone who never mentioned
+                    # channel points is noise about a feature they are not using.
+                    log.info("Baseline subscription %s unavailable: %s", sub_type, exc)
         await self.broadcast_status()
 
     async def _existing_subscription_types(self, session_id: str) -> set[str]:
@@ -530,6 +593,66 @@ class TwitchService:
             log.info("Could not close redemption %s: %s", redemption_id, exc)
             return False
 
+
+    # ------------------------------------------------------- identify a reward
+
+    #: How long a listen lasts. Long enough to alt-tab and redeem, short enough
+    #: that it cannot be left on and forgotten.
+    CAPTURE_SECONDS = 90
+
+    def capture_state(self) -> dict[str, Any]:
+        remaining = max(0.0, self._capture_until - time.time())
+        return {
+            "listening": remaining > 0,
+            "expires_in_ms": int(remaining * 1000),
+            "reward": self._captured,
+        }
+
+    async def start_reward_capture(self, seconds: Optional[int] = None) -> dict[str, Any]:
+        """Watch for the next redemption, once, to learn which reward it was.
+
+        Deliberately a moment rather than a habit. WheelHat sees every
+        redemption on the channel because of the baseline subscription, so it
+        could keep a running list - but a tool quietly recording everything
+        viewers redeem is not something to switch on without being asked. This
+        arms on a button press, remembers one reward, and forgets by itself.
+
+        Nothing about the viewer is kept: only the reward's id, name and cost.
+        """
+        window = int(seconds or self.CAPTURE_SECONDS)
+        self._capture_until = time.time() + max(5, min(window, 300))
+        self._captured = None
+        await self.broadcast_status()
+        return self.capture_state()
+
+    async def stop_reward_capture(self) -> dict[str, Any]:
+        self._capture_until = 0.0
+        self._captured = None
+        await self.broadcast_status()
+        return self.capture_state()
+
+    async def offer_redemption(self, data: dict[str, Any]) -> bool:
+        """Show a redemption to an armed listen. True if it was taken.
+
+        Called for every channel point redemption; does nothing at all unless
+        someone armed a listen and it has not expired.
+        """
+        if time.time() >= self._capture_until:
+            return False
+        reward_id = str(data.get("reward_id", ""))
+        if not reward_id:
+            return False
+        self._captured = {
+            "id": reward_id,
+            "title": str(data.get("reward", "")),
+            "cost": int(data.get("reward_cost", 0) or 0),
+        }
+        # One reward is the whole point; stop listening immediately.
+        self._capture_until = 0.0
+        log.info("Identified channel point reward %r for a trigger", self._captured["title"])
+        await self.broadcast_status()
+        return True
+
     # ------------------------------------------------------------------ status
 
     def status(self) -> dict[str, Any]:
@@ -543,6 +666,8 @@ class TwitchService:
             "signed_in": bool(self.tokens.valid and self.tokens.user_id),
             "login": self.tokens.login,
             "display_name": self.tokens.display_name,
+            "broadcaster_type": self.tokens.broadcaster_type,
+            "has_channel_points": self.has_channel_points,
             "user_id": self.tokens.user_id,
             "scopes": self.tokens.scopes,
             "missing_scopes": missing,
@@ -550,6 +675,7 @@ class TwitchService:
             "eventsub_state": self._eventsub.state,
             "eventsub_error": self._eventsub.last_error,
             "subscriptions": self.subscriptions,
+            "reward_capture": self.capture_state(),
             "subscription_errors": self.sub_errors,
             "pending_flow": self.flow.to_public() if self.flow else None,
             "flow_error": self.flow_error,

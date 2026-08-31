@@ -128,6 +128,11 @@ thin wedges a label drops back to one smaller line instead of cramming. Turn
 wrapping off for strictly one line per wedge, in which case *Trim labels after N
 characters* applies instead.
 
+The **drop shadow** is configurable per wheel — softness, offset, colour and
+opacity, or off entirely. Sizes scale with the wheel, so one setting looks right
+on any browser source. It is a CSS `drop-shadow`, so a wheel with a centre hole
+or gaps between its wedges casts the shadow of that shape rather than a disc.
+
 Wedge borders are drawn as **inlines**, inside each wedge rather than centred on
 its edge. Two neighbouring wedges therefore meet inline-to-inline instead of both
 painting the shared edge, which would otherwise leave it thicker than the outer
@@ -342,14 +347,42 @@ point redeem at a wheel's trigger URL
 (`http://localhost:8777/api/wheels/<id>/trigger?user=$user`) and you never have
 to connect WheelHat to Twitch.
 
-WheelHat only subscribes to the EventSub topics your wheels actually use — add a
-bits trigger and it starts listening for bits, not before.
+WheelHat subscribes to channel point redemptions as soon as you sign in, so
+every reward on your channel is seen whether or not a wheel uses it yet. Other
+topics are added as your wheels need them — add a bits trigger and it starts
+listening for bits, not before. The Twitch page shows both groups separately.
+
+It also subscribes to `stream.online`, which needs no permissions. Twitch closes
+an EventSub connection that has no subscriptions on it, and channel points need
+affiliate status, so that one guarantees the connection stays up on any channel.
+
+### Not an affiliate yet?
+
+Channel points and bits only exist on affiliate and partner channels. WheelHat
+notices, stops offering them, and says so rather than letting a channel point
+trigger sit there never firing — affiliate-only triggers are labelled in the
+editor, and the rewards card explains the situation instead of showing a form
+Twitch would refuse.
+
+Everything else works. **Chat command** triggers run a wheel from chat on any
+channel: set a command like `!spin`, choose who may use it — everyone,
+subscribers, VIPs or moderators — and add the usual global and per-viewer
+cooldowns. Follows and raids work everywhere too.
 
 ### Channel point rewards
 
 The Twitch page can **create rewards on your channel**, so you never have to go
 looking for a reward id — create one, then pick it from the dropdown on a
 wheel's trigger.
+
+For a reward that already exists — including one made on Twitch itself — press
+**Listen** beside the reward dropdown on a channel point trigger and redeem it
+on your channel. WheelHat fills the reward in for you.
+
+That listen is deliberately a moment, not a habit. WheelHat sees every
+redemption on your channel anyway, but it only remembers one, only while you
+have armed it, and the window closes by itself. It keeps the reward's name, id
+and cost — never anything about the viewer.
 
 Rewards created in WheelHat can also be **closed automatically**: tick *Close the
 redemption once the wheel has spun* on the trigger and the redemption is marked
@@ -455,7 +488,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 235 tests
+.venv\Scripts\python -m pytest          # 248 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

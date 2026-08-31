@@ -213,6 +213,13 @@ async def handle_twitch_event(event_type: str, event: dict[str, Any]) -> None:
     )
 
     trigger_type = data["trigger_type"]
+
+    # If someone is identifying a reward for a trigger right now, this is the
+    # redemption they went and made. Does nothing unless they armed it.
+    if trigger_type == "channel_points":
+        from .twitch.service import twitch
+
+        await twitch.offer_redemption(data)
     for wheel in db.list_wheels():
         if not wheel.enabled:
             continue

@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WheelHat</title>
     <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-    />
+    <!--
+      No webfont is fetched. Loading Inter from Google's CDN disclosed every
+      viewer's IP address to Google, which a German court found unlawful without
+      consent (LG Muenchen I, 2022). The stylesheet asks for Inter first and
+      falls back to Segoe UI and the system UI font, so a machine that has Inter
+      still uses it and nothing leaves the machine either way.
+    -->
     <link rel="stylesheet" href="/static/css/app.css" />
   </head>
   <body>

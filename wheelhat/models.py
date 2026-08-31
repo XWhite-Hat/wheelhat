@@ -130,6 +130,17 @@ class Appearance(BaseModel):
     #: cutting it short. Turn off for strictly one line per wedge, where
     #: label_max_chars applies instead.
     label_wrap: bool = True
+
+    # -- drop shadow ---------------------------------------------------------
+    shadow_enabled: bool = True
+    shadow_color: str = "#000000"
+    #: 0-1. Kept apart from the colour so a colour picker can drive the hue.
+    shadow_opacity: float = 0.45
+    #: All three are px at a 600px wheel and scale with it, so a shadow set
+    #: on one browser source looks the same on a larger one.
+    shadow_blur: float = 45.0
+    shadow_offset_x: float = 0.0
+    shadow_offset_y: float = 18.0
     size: int = 720
     background: str = "transparent"
     #: The browser source this wheel is designed for. Nothing is forced to these

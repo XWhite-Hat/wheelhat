@@ -18,7 +18,7 @@ import { imageLayerControl } from './image-layer.js';
 import { renderFields } from './fields.js';
 import { store, subscribe } from './store.js';
 import { TRIGGER_TYPES, triggerSpec } from './trigger-schemas.js';
-import { contrastColor, recommendedSource, WheelRenderer } from './wheel-canvas.js';
+import { contrastColor, recommendedSource, shadowFilter, WheelRenderer } from './wheel-canvas.js';
 
 const DEFAULT_PALETTE = [
   '#e5484d', '#f76b15', '#ffb224', '#46a758',
@@ -117,6 +117,8 @@ export async function renderWheelEditor(main, wheelId) {
   const renderer = new WheelRenderer(canvas);
 
   function updatePreview() {
+    // The preview should look like the overlay, shadow included.
+    canvas.style.filter = shadowFilter(wheel.appearance, canvas.getBoundingClientRect().width);
     renderer.setState({
       slices: wheel.slices
         .filter((s) => s.enabled && s.weight > 0)
@@ -652,6 +654,14 @@ export async function renderWheelEditor(main, wheelId) {
             spec.needsTwitch && !store.twitch?.signed_in
               ? h('span.pill.warn', 'sign in to Twitch')
               : null,
+            // Silently never firing is the worst outcome; say why up front.
+            spec.needsAffiliate && store.twitch?.signed_in && store.twitch?.has_channel_points === false
+              ? h(
+                  'span.pill.warn',
+                  { title: 'Channel points and bits need affiliate or partner status. A chat command trigger works on any channel.' },
+                  'needs affiliate'
+                )
+              : null,
             h(
               'label.switch',
               h('input', {
@@ -931,7 +941,51 @@ export async function renderWheelEditor(main, wheelId) {
               + 'and leaves the full height for the wheel itself.'
           )
         ),
-        sourceSizeCard()
+        sourceSizeCard(),
+        shadowCard()
+      )
+    );
+  }
+
+  /** The wheel's drop shadow. Sizes are px at a 600px wheel and scale with it. */
+  function shadowCard() {
+    const a = wheel.appearance;
+    const on = a.shadow_enabled !== false;
+    const number = (key, label, min, max, step) =>
+      field(
+        label,
+        h('input', {
+          type: 'number', min, max, step, value: a[key], disabled: !on,
+          oninput: (e) => { a[key] = Number(e.target.value) || 0; changed(); },
+        })
+      );
+
+    return h(
+      'div',
+      { style: { marginTop: '18px' } },
+      h('h3', 'Drop shadow'),
+      h(
+        'div.help',
+        { style: { marginBottom: '10px' } },
+        'Lifts the wheel off whatever is behind it in OBS. Sizes scale with the '
+          + 'wheel, so the same setting looks right at any source size.'
+      ),
+      switchField('Cast a shadow', on, (e) => {
+        a.shadow_enabled = e.target.checked;
+        changed();
+        drawTab();
+      }),
+      h(
+        'div.grid.two',
+        { style: { marginTop: '10px' } },
+        number('shadow_blur', 'Softness', 0, 200, 1),
+        number('shadow_offset_y', 'Vertical offset', -200, 200, 1),
+        number('shadow_offset_x', 'Horizontal offset', -200, 200, 1),
+        number('shadow_opacity', 'Opacity (0-1)', 0, 1, 0.05),
+        colorField('Shadow colour', a.shadow_color, (e) => {
+          a.shadow_color = e.target.value;
+          changed();
+        })
       )
     );
   }

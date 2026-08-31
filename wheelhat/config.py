@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 APP_NAME = "WheelHat"
@@ -10,6 +11,12 @@ APP_NAME = "WheelHat"
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_DIR.parent
 WEB_DIR = PACKAGE_DIR / "web"
+
+#: Where LICENSE and THIRD-PARTY-NOTICES.md are. PyInstaller unpacks bundled
+#: data into a temporary folder it advertises as sys._MEIPASS; from source
+#: they sit beside the project. The app serves them so the attribution
+#: travels with the executable rather than only with the repository.
+LICENCE_DIR = Path(getattr(sys, "_MEIPASS", "") or PROJECT_ROOT)
 
 
 def _load_dotenv() -> None:

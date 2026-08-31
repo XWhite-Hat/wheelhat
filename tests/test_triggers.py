@@ -1,9 +1,11 @@
 """Turning Twitch events into spins: normalisation, matching and cooldowns."""
 
 
+import time
+
 import pytest
 
-from wheelhat import db, triggers
+from wheelhat import config, db, triggers
 from wheelhat.engine import engine
 from wheelhat.models import Slice, Trigger, Wheel
 
@@ -311,88 +313,178 @@ class FakeEventSub:
         self.session_id = ""
 
 
-async def test_no_eventsub_socket_when_nothing_listens(monkeypatch):
-    """Twitch closes a socket with no subscriptions after ~10s, code 4003.
-
-    Connecting with no triggers configured does not idle - it becomes a
-    permanent connect/drop/retry loop against Twitch.
-    """
+def signed_in_service():
     from wheelhat.twitch.service import TwitchService
 
     service = TwitchService()
-    fake = FakeEventSub()
-    service._eventsub = fake
+    service._eventsub = FakeEventSub()
+    service.tokens.access_token = "tok"
     service.tokens.user_id = "42"
+    service.tokens.scopes = list(config.TWITCH_SCOPES)
+    return service
 
-    # A wheel with no triggers at all.
+
+async def test_signed_out_holds_no_socket():
+    service = signed_in_service()
+    service.tokens.access_token = ""
+
+    await service.sync_eventsub()
+    assert service._eventsub.starts == 0
+
+
+async def test_signing_in_connects_even_with_no_triggers():
+    """Otherwise the Twitch page reads "disconnected" straight after a
+    successful sign-in, which looks like the sign-in failed."""
+    service = signed_in_service()
     db.save_wheel(Wheel(name="Quiet", slices=[Slice(id="sl_1", label="One")]))
     assert service.needed_subscription_types() == []
 
     await service.sync_eventsub()
-    assert fake.starts == 0, "should not open a socket with nothing to subscribe to"
+    assert service._eventsub.starts == 1
 
 
-async def test_the_socket_opens_once_a_trigger_needs_it(monkeypatch):
-    from wheelhat.twitch.service import TwitchService
+async def test_the_baseline_always_gives_the_socket_something_to_do():
+    """Twitch closes a socket with no subscriptions (code 4003), so the
+    baseline is what stops the connect/drop/retry loop."""
+    service = signed_in_service()
+    db.save_wheel(Wheel(name="Quiet", slices=[Slice(id="sl_1", label="One")]))
 
-    service = TwitchService()
-    fake = FakeEventSub()
-    service._eventsub = fake
-    service.tokens.user_id = "42"
+    assert service.all_subscription_types(), "a signed-in client must always want something"
 
+
+async def test_the_baseline_survives_a_channel_without_channel_points():
+    """Channel points need affiliate status. If that were the only baseline, a
+    non-affiliate would be back to an unused socket and the 4003 loop."""
+    from wheelhat.twitch.service import BASELINE_SUBSCRIPTIONS, SUBSCRIPTION_SPECS
+
+    unscoped = [s for s in BASELINE_SUBSCRIPTIONS if not SUBSCRIPTION_SPECS[s]["scope"]]
+    assert unscoped, "at least one baseline subscription must need no scope and no affiliate status"
+
+
+async def test_a_trigger_adds_its_topic_on_top_of_the_baseline():
+    service = signed_in_service()
     db.save_wheel(
         Wheel(
             name="Listening",
             slices=[Slice(id="sl_1", label="One")],
-            triggers=[Trigger(type="channel_points", config={"reward_id": "r-1"})],
+            triggers=[Trigger(type="cheer", config={})],
         )
     )
-    assert service.needed_subscription_types() != []
 
+    assert "channel.cheer" in service.all_subscription_types()
     await service.sync_eventsub()
-    assert fake.starts == 1
+    assert service._eventsub.starts == 1
 
 
-async def test_the_socket_closes_when_the_last_trigger_goes(monkeypatch):
-    """Otherwise removing your only trigger leaves the 4003 loop running."""
+async def test_subscriptions_report_which_are_always_on(monkeypatch):
+    """The card separates the two, so the payload has to distinguish them.
+
+    Channel point redemptions are subscribed whether or not a wheel uses them,
+    so presenting everything as "added by your wheels" would be untrue.
+    """
     from wheelhat.twitch.service import TwitchService
 
     service = TwitchService()
-    fake = FakeEventSub()
-    service._eventsub = fake
+    service.tokens.access_token = "tok"
     service.tokens.user_id = "42"
+    service.tokens.broadcaster_type = "affiliate"
+    service.tokens.scopes = list(config.TWITCH_SCOPES)
 
-    wheel = db.save_wheel(
-        Wheel(
-            name="Listening",
-            slices=[Slice(id="sl_1", label="One")],
-            triggers=[Trigger(type="channel_points", config={"reward_id": "r-1"})],
-        )
-    )
-    await service.sync_eventsub()
-    assert fake.running is True
+    async def fake_helix(self, method, path, *, params=None, json_body=None, _retried=False):
+        return {"data": []}
 
-    wheel.triggers = []
-    db.save_wheel(wheel)
-    await service.sync_eventsub()
-    assert fake.stops == 1
-    assert fake.running is False
-
-
-async def test_a_disabled_trigger_does_not_hold_the_socket_open(monkeypatch):
-    from wheelhat.twitch.service import TwitchService
-
-    service = TwitchService()
-    fake = FakeEventSub()
-    service._eventsub = fake
-    service.tokens.user_id = "42"
+    monkeypatch.setattr(TwitchService, "helix", fake_helix)
+    monkeypatch.setattr(TwitchService, "broadcast_status", lambda self: _noop())
 
     db.save_wheel(
         Wheel(
-            name="Off",
+            name="Cheers",
             slices=[Slice(id="sl_1", label="One")],
-            triggers=[Trigger(type="channel_points", enabled=False, config={"reward_id": "r-1"})],
+            triggers=[Trigger(type="cheer", config={})],
         )
     )
-    await service.sync_eventsub()
-    assert fake.starts == 0
+
+    await service.subscribe_all("session-1")
+    by_type = {s["type"]: s for s in service.subscriptions}
+
+    assert by_type["stream.online"]["baseline"] is True
+    assert by_type["channel.channel_points_custom_reward_redemption.add"]["baseline"] is True
+    assert by_type["channel.cheer"]["baseline"] is False, "a wheel asked for this one"
+
+
+async def _noop():
+    return None
+
+
+# ------------------------------------------------------ identifying a reward
+
+
+def redemption_event(reward_id="r-7", title="Spin the wheel", cost=500):
+    return {
+        "id": "redemption-1",
+        "user_id": "42",
+        "user_login": "viewer",
+        "user_name": "Viewer",
+        "user_input": "",
+        "reward": {"id": reward_id, "title": title, "cost": cost},
+        "redeemed_at": "2026-08-31T12:00:00Z",
+    }
+
+
+async def test_a_listen_identifies_the_next_reward_redeemed():
+    """So nobody has to go and find a reward id, including for rewards created
+    on Twitch itself, which WheelHat cannot create but can still see."""
+    from wheelhat.twitch.service import twitch
+
+    await twitch.start_reward_capture(60)
+    assert twitch.capture_state()["listening"] is True
+
+    await triggers.handle_twitch_event(REDEEM, redemption_event())
+
+    captured = twitch.capture_state()["reward"]
+    assert captured == {"id": "r-7", "title": "Spin the wheel", "cost": 500}
+    assert twitch.capture_state()["listening"] is False, "one reward is the point"
+
+
+async def test_nothing_is_recorded_unless_a_listen_is_armed():
+    """WheelHat sees every redemption because of the baseline subscription.
+    Remembering them without being asked is the thing not to do."""
+    from wheelhat.twitch.service import twitch
+
+    await twitch.stop_reward_capture()
+    await triggers.handle_twitch_event(REDEEM, redemption_event())
+    assert twitch.capture_state()["reward"] is None
+
+
+async def test_a_listen_expires_on_its_own():
+    """It cannot be left armed and forgotten."""
+    from wheelhat.twitch.service import twitch
+
+    await twitch.start_reward_capture(60)
+    twitch._capture_until = time.time() - 1  # as if the window had passed
+
+    await triggers.handle_twitch_event(REDEEM, redemption_event())
+    assert twitch.capture_state()["reward"] is None
+    assert twitch.capture_state()["listening"] is False
+
+
+async def test_the_listen_window_is_bounded():
+    """A caller cannot arm it for a week."""
+    from wheelhat.twitch.service import twitch
+
+    state = await twitch.start_reward_capture(99999)
+    assert state["expires_in_ms"] <= 300_000
+    await twitch.stop_reward_capture()
+
+
+async def test_only_the_reward_is_kept_never_the_viewer():
+    """The viewer's name and id are in the event and must not be retained."""
+    from wheelhat.twitch.service import twitch
+
+    await twitch.start_reward_capture(60)
+    await triggers.handle_twitch_event(REDEEM, redemption_event())
+
+    kept = twitch.capture_state()["reward"]
+    assert set(kept) == {"id", "title", "cost"}
+    assert "Viewer" not in str(kept)
+    assert "42" not in str(kept.get("id", "")) + str(kept.get("title", ""))

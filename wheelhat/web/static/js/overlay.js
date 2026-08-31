@@ -5,7 +5,7 @@
  * Nothing here decides a winner; that keeps every open source in agreement.
  */
 
-import { RESULT_BAND, TITLE_BAND, WheelRenderer } from './wheel-canvas.js';
+import { RESULT_BAND, shadowFilter, TITLE_BAND, WheelRenderer } from './wheel-canvas.js';
 
 const wheelId = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
 const params = new URLSearchParams(location.search);
@@ -80,6 +80,9 @@ function layout() {
   lastSize = size;
   wrap.style.width = `${size}px`;
   wrap.style.height = `${size}px`;
+  // Sized here too: the shadow scales with the wheel, so it has to be
+  // recomputed whenever the source is resized.
+  wrap.style.filter = shadowFilter(appearance, size);
   renderer.resize();
 }
 
@@ -109,6 +112,9 @@ function applyState(state) {
   }
 
   layout();
+  // layout() returns early when the size has not changed, so the filter is
+  // applied here as well - editing the shadow does not resize anything.
+  wrap.style.filter = shadowFilter(appearance, lastSize || 0);
   scheduleIdleHide();
 }
 

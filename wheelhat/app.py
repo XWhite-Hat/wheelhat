@@ -8,7 +8,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, config, db, httpclient
@@ -87,6 +87,24 @@ def create_app() -> FastAPI:
     config.ensure_dirs()
     app.mount("/static", StaticFiles(directory=config.WEB_DIR / "static"), name="static")
     app.mount("/assets", StaticFiles(directory=config.ASSETS_DIR), name="assets")
+
+    @app.get("/licences", include_in_schema=False)
+    async def licences() -> PlainTextResponse:
+        """WheelHat's licence and the notices for everything it bundles.
+
+        Served rather than merely shipped: the executable contains around
+        twenty-five third-party packages, and MIT and BSD-3-Clause both require
+        the notice to accompany the binary. Someone who has only the .exe can
+        read it here.
+        """
+        parts = []
+        for name in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
+            path = config.LICENCE_DIR / name
+            if path.is_file():
+                text = path.read_text(encoding="utf-8")
+                parts.append(f"===== {name} =====\n\n{text}")
+        body = "\n\n".join(parts) or "Licence texts are not available in this build."
+        return PlainTextResponse(body)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> JSONResponse:

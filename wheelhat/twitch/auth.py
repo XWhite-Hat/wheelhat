@@ -39,6 +39,10 @@ class Tokens:
     user_id: str = ""
     login: str = ""
     display_name: str = ""
+    #: "affiliate", "partner", or empty for a regular channel. Channel
+    #: points and bits only exist on affiliate and partner channels, so
+    #: this decides what WheelHat can honestly offer.
+    broadcaster_type: str = ""
     #: The application these tokens were issued to. A token is only usable with
     #: the client id that obtained it, so this is what lets a stored token be
     #: recognised as stale when the application changes. Empty on tokens saved
@@ -62,6 +66,7 @@ class Tokens:
             "user_id": self.user_id,
             "login": self.login,
             "display_name": self.display_name,
+            "broadcaster_type": self.broadcaster_type,
             "client_id": self.client_id,
         }
 

@@ -89,6 +89,16 @@ async def create_reward(payload: RewardPayload) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="The reward needs a name.")
     if payload.cost < 1:
         raise HTTPException(status_code=422, detail="A reward has to cost at least 1 point.")
+    if not twitch.has_channel_points:
+        # Twitch would refuse this anyway, with a message about the broadcaster.
+        # Saying what to do instead is more use than relaying that.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Channel points need affiliate or partner status, so there are no rewards "
+                "to create on this channel yet. A chat command trigger works on any channel."
+            ),
+        )
     try:
         return {"reward": await twitch.create_reward(
             payload.title,
@@ -102,6 +112,26 @@ async def create_reward(payload: RewardPayload) -> dict[str, Any]:
         )}
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# Declared before /rewards/{reward_id}: FastAPI matches in order, and a path
+# parameter happily swallows the literal "listen".
+@router.post("/rewards/listen")
+async def start_reward_listen(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Watch for the next redemption so a reward can be identified by redeeming it.
+
+    Exists so nobody has to find a reward id, including for rewards created on
+    Twitch itself, which WheelHat cannot create or manage but can still see.
+    """
+    if not twitch.tokens.valid:
+        raise HTTPException(status_code=400, detail="Sign in to Twitch first.")
+    seconds = int((payload or {}).get("seconds") or 0) or None
+    return {"reward_capture": await twitch.start_reward_capture(seconds)}
+
+
+@router.delete("/rewards/listen")
+async def stop_reward_listen() -> dict[str, Any]:
+    return {"reward_capture": await twitch.stop_reward_capture()}
 
 
 @router.delete("/rewards/{reward_id}")

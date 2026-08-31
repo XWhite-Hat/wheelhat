@@ -42,12 +42,15 @@ export const TRIGGER_TYPES = [
     label: 'Channel point redemption',
     description: 'Fires when a viewer redeems a specific reward.',
     needsTwitch: true,
+    // Channel points do not exist on a regular channel.
+    needsAffiliate: true,
     fields: [
       {
         key: 'reward_id',
         label: 'Reward',
         type: 'select',
         source: 'twitch.rewards',
+        capture: 'twitch.reward',
         help: 'Sign in to Twitch to load your rewards. Pick the one that should spin this wheel.',
       },
       {
@@ -102,6 +105,7 @@ export const TRIGGER_TYPES = [
   },
   {
     type: 'cheer',
+    needsAffiliate: true,
     label: 'Bits cheered',
     description: 'Fires when someone cheers at least this many bits.',
     needsTwitch: true,

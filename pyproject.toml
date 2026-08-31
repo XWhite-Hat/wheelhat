@@ -5,7 +5,9 @@ description = "Spinner wheels for Twitch streamers, with OBS browser sources, ch
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-license-files = ["LICENSE"]
+# THIRD-PARTY-NOTICES.md ships too: README links to it, and it was a dead
+# link for anyone installing from PyPI.
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 authors = [{ name = "WheelHat contributors" }]
 keywords = ["twitch", "streaming", "obs", "vtuber", "overlay", "wheel", "streamer"]
 classifiers = [

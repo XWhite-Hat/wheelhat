@@ -25,6 +25,13 @@ jobs:
       - name: Install ruff
         # Pinned so a new ruff release cannot break CI on an unrelated PR.
         run: pipx install ruff==0.16.4
+      - name: Check the third-party notices are current
+        # Attribution is a licence obligation, not documentation. This fails if
+        # a dependency was added without being attributed.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[bootstrap]"
+          python scripts/gen_notices.py --check
       - name: Lint
         # Rules and line length come from [tool.ruff] in pyproject.toml.
         run: ruff check --output-format=github .

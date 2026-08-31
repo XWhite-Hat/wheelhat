@@ -201,6 +201,80 @@ function buildField(field, values, change, extraParams, state) {
   }
 }
 
+/**
+ * "Redeem it and I will fill this in."
+ *
+ * WheelHat sees every channel point redemption anyway, but it only remembers
+ * one while this is armed, and only the reward - never who redeemed it. That is
+ * the difference between a convenience and a log of what viewers spend points
+ * on, and it is why this is a button rather than something running in the
+ * background.
+ */
+function attachRewardListen({ button, note, field, values, change, control }) {
+  let timer = null;
+
+  const stop = (message) => {
+    clearInterval(timer);
+    timer = null;
+    button.textContent = 'Listen';
+    button.disabled = false;
+    if (note) {
+      note.textContent = message || '';
+      note.hidden = !message;
+    }
+  };
+
+  // A field can be removed from the page while a listen is running.
+  const observer = new MutationObserver(() => {
+    if (!control.isConnected && timer) stop('');
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  const poll = async () => {
+    let status;
+    try {
+      status = (await api.get('/twitch/status')).twitch;
+    } catch {
+      stop('Could not reach Twitch. Try again.');
+      return;
+    }
+    const capture = status?.reward_capture || {};
+    if (capture.reward) {
+      values[field.key] = capture.reward.id;
+      change();
+      invalidateOptions(field.source);
+      stop(`Using "${capture.reward.title}". Reload the list to see it by name.`);
+      return;
+    }
+    if (!capture.listening) {
+      stop('No redemption came through in time.');
+      return;
+    }
+    button.textContent = `Listening… ${Math.ceil(capture.expires_in_ms / 1000)}s`;
+  };
+
+  button.addEventListener('click', async () => {
+    if (timer) {
+      await api.del('/twitch/rewards/listen').catch(() => {});
+      stop('');
+      return;
+    }
+    try {
+      await api.post('/twitch/rewards/listen', {});
+    } catch (err) {
+      stop(err.message || 'Could not start listening.');
+      return;
+    }
+    button.textContent = 'Listening…';
+    if (note) {
+      note.textContent = 'Go and redeem the reward on your channel.';
+      note.hidden = false;
+    }
+    timer = setInterval(poll, 1500);
+    poll();
+  });
+}
+
 function buildStaticSelect(field, values, change, wrapper, control) {
   const select = h(
     'select',
@@ -252,9 +326,27 @@ function buildLiveSelect(field, values, change, extraParams, wrapper, control, s
     });
   }
 
-  const live = h('div.select-live', select, refreshButton, field.allow_custom === false ? null : manualButton);
+  // Some values are easier to demonstrate than to look up. A channel point
+  // reward is one: rather than hunting for its id, arm a listen and redeem it.
+  const listenButton = field.capture === 'twitch.reward'
+    ? h('button.btn.small', { type: 'button', title: 'Redeem the reward on your channel and WheelHat will fill this in' }, 'Listen')
+    : null;
+  const listenNote = listenButton ? h('div.help', { hidden: true }) : null;
+
+  const live = h(
+    'div.select-live',
+    select,
+    refreshButton,
+    field.allow_custom === false ? null : manualButton,
+    listenButton
+  );
   wrapper.append(labelFor(field), live, manualInput, error);
+  if (listenNote) wrapper.appendChild(listenNote);
   if (help) wrapper.appendChild(help);
+
+  if (listenButton) {
+    attachRewardListen({ button: listenButton, note: listenNote, field, values, change, control });
+  }
 
   select.addEventListener('change', () => {
     values[field.key] = select.value;

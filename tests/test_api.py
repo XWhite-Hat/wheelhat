@@ -610,3 +610,108 @@ async def test_closing_needs_all_three_ids(monkeypatch):
     service.tokens.user_id = "42"
     assert await service.close_redemption("", "red-9", fulfilled=True) is False
     assert await service.close_redemption("r-1", "", fulfilled=True) is False
+
+
+async def test_a_regular_channel_is_told_what_to_use_instead(client, monkeypatch):
+    """Channel points need affiliate status. Relaying Twitch's error leaves
+    someone stuck; naming the alternative does not."""
+    from wheelhat.twitch.service import twitch
+
+    monkeypatch.setattr(type(twitch), "has_channel_points", property(lambda self: False))
+    response = await client.post("/api/twitch/rewards", json={"title": "Spin", "cost": 500})
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "affiliate" in detail
+    assert "chat command" in detail.lower(), "must name the thing that does work"
+
+
+async def test_channel_points_are_not_subscribed_on_a_regular_channel(monkeypatch):
+    """Otherwise every reconnect makes a request Twitch is certain to refuse."""
+    from wheelhat.twitch.service import TwitchService
+
+    service = TwitchService()
+    service.tokens.access_token = "tok"
+    service.tokens.user_id = "42"
+
+    service.tokens.broadcaster_type = ""
+    assert service.has_channel_points is False
+    types = service.all_subscription_types()
+    assert "channel.channel_points_custom_reward_redemption.add" not in types
+    assert types, "the socket still needs something, or Twitch closes it as unused"
+
+    service.tokens.broadcaster_type = "affiliate"
+    assert service.has_channel_points is True
+    assert "channel.channel_points_custom_reward_redemption.add" in service.all_subscription_types()
+
+
+def test_every_bundled_package_is_named_in_the_notices():
+    """MIT and BSD-3-Clause bind binary redistribution, and the executable is a
+    distribution of every package inside it. The table drifted once already."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "gen_notices",
+        pathlib.Path(__file__).resolve().parent.parent / "scripts" / "gen_notices.py",
+    )
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+
+    notices = gen.NOTICES.read_text(encoding="utf-8").lower()
+    missing = [name for name in gen.bundled_distributions() if name.lower() not in notices]
+    assert not missing, f"not attributed in THIRD-PARTY-NOTICES.md: {missing}"
+
+
+def test_the_pages_fetch_nothing_from_third_party_hosts():
+    """A webfont from a CDN discloses every viewer's IP to that CDN, and an OBS
+    browser source would do it on every scene load."""
+    web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web"
+    offenders = []
+    for path in list(web.glob("*.html")) + list((web / "static" / "css").glob("*.css")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"(href|src|@import)\s*=?\s*[\"'(]?https?://", line):
+                offenders.append(f"{path.name}:{number}")
+    assert not offenders, f"external resource requests: {offenders}"
+
+
+async def test_listen_is_not_routed_as_a_reward_named_listen(client):
+    """A path parameter swallows literals declared after it. /rewards/listen
+    was reaching the delete-a-reward handler with reward_id="listen"."""
+    from wheelhat.twitch.service import twitch
+
+    twitch.tokens.access_token = "tok"
+    twitch.tokens.user_id = "42"
+    try:
+        response = await client.delete("/api/twitch/rewards/listen")
+        assert response.status_code == 200
+        assert "reward_capture" in response.json()
+    finally:
+        twitch.tokens.access_token = ""
+        twitch.tokens.user_id = ""
+
+
+async def test_shadow_settings_round_trip_with_the_old_look_as_default(client):
+    """The defaults reproduce the stylesheet value they replaced
+    (0 18px 45px rgba(0,0,0,0.45)), so existing wheels are unchanged."""
+    made = (await client.post("/api/wheels", json={})).json()
+    look = made["appearance"]
+    assert look["shadow_enabled"] is True
+    assert look["shadow_blur"] == 45.0
+    assert look["shadow_offset_y"] == 18.0
+    assert look["shadow_offset_x"] == 0.0
+    assert look["shadow_opacity"] == 0.45
+    assert look["shadow_color"] == "#000000"
+
+    look["shadow_enabled"] = False
+    look["shadow_blur"] = 12.5
+    look["shadow_color"] = "#ff0066"
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+
+    assert saved["appearance"]["shadow_enabled"] is False
+    assert saved["appearance"]["shadow_blur"] == 12.5
+    assert saved["appearance"]["shadow_color"] == "#ff0066"
+
+    from wheelhat.engine import render_payload
+
+    overlay = render_payload(db.get_wheel(made["id"]))["appearance"]
+    assert overlay["shadow_blur"] == 12.5, "the overlay needs it to draw the shadow"

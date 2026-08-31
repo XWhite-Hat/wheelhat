@@ -82,7 +82,13 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: WheelHat-windows
-          path: dist/WheelHat.exe
+          # The licence texts travel with the binary. MIT and BSD-3-Clause both
+          # bind binary redistribution, and a one-file exe is a distribution of
+          # every package inside it.
+          path: |
+            dist/WheelHat.exe
+            LICENSE
+            THIRD-PARTY-NOTICES.md
 
   publish:
     name: Attach to the GitHub Release
@@ -101,3 +107,5 @@ jobs:
           files: |
             artifacts/dist/*
             artifacts/WheelHat-windows/WheelHat.exe
+            artifacts/WheelHat-windows/LICENSE
+            artifacts/WheelHat-windows/THIRD-PARTY-NOTICES.md

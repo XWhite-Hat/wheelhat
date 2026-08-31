@@ -53,6 +53,7 @@ body {
   flex: 0 1 auto;
   display: grid;
   place-items: center;
+  /* Replaced by the wheel's own setting as soon as its state arrives. */
   filter: drop-shadow(var(--wh-shadow));
 }
 

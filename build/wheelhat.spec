@@ -45,6 +45,12 @@ a = Analysis(
     binaries=[*ctk_binaries, *_extra_binaries],
     datas=[
         (str(HERE / "wheelhat" / "web"), "wheelhat/web"),
+        # MIT and BSD-3-Clause both bind binary redistribution: the notice has
+        # to travel with the thing that contains the code. A one-file exe is a
+        # distribution of ~25 third-party packages, so the licence text ships
+        # inside it and the app links to it from the Settings page.
+        (str(HERE / "LICENSE"), "."),
+        (str(HERE / "THIRD-PARTY-NOTICES.md"), "."),
         *ctk_datas,
     ],
     hiddenimports=[
@@ -85,6 +91,11 @@ a = Analysis(
         # ~7 MB to the build for a feature the wizard does not use.
         "PIL",
         "Pillow",
+        # The test runner is not part of the application. Excluding "pytest"
+        # alone does not work: _pytest is a separate top-level package and
+        # comes in on its own, bringing pygments and ~340 modules with it.
+        "_pytest",
+        "pygments",
         # Never used, and large.
         "matplotlib",
         "numpy",
