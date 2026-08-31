@@ -8,7 +8,7 @@ import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .. import db
-from ..engine import engine, render_payload
+from ..engine import ActiveSpin, engine, render_payload
 from ..hub import hub
 from ..integrations.registry import registry
 from ..twitch.service import twitch
@@ -16,6 +16,25 @@ from ..twitch.service import twitch
 log = logging.getLogger("wheelhat.ws")
 
 ws_router = APIRouter()
+
+
+def resync_payload(active: ActiveSpin) -> dict[str, object]:
+    """What a source that connects mid-spin needs to catch up.
+
+    winner_id is what lets the overlay put the pointer on the winning slice.
+    Without it the banner names one slice while the wheel sits wherever it
+    was at rest, which reads as the wheel disagreeing with its own result.
+    """
+    return {
+        "type": "spin_resync",
+        "spin_id": active.spin_id,
+        "winner": active.winner,
+        "winner_id": active.winner_id,
+        "ends_in_ms": max(0, int((active.ends_at - time.time()) * 1000)),
+        # Time left on the wheel itself, so a source that joins mid-spin can
+        # animate the rest of it instead of cutting straight to the answer.
+        "stops_in_ms": max(0, int((active.stops_at - time.time()) * 1000)),
+    }
 
 
 @ws_router.websocket("/ws/overlay/{wheel_id}")
@@ -34,14 +53,7 @@ async def overlay_socket(websocket: WebSocket, wheel_id: str) -> None:
         # A browser source that reloads mid-spin should catch up rather than sit idle.
         active = engine.active_spin(wheel_id)
         if active is not None:
-            await websocket.send_json(
-                {
-                    "type": "spin_resync",
-                    "spin_id": active.spin_id,
-                    "winner": active.winner,
-                    "ends_in_ms": max(0, int((active.ends_at - time.time()) * 1000)),
-                }
-            )
+            await websocket.send_json(resync_payload(active))
 
         while True:
             message = await websocket.receive_json()

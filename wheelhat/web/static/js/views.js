@@ -464,10 +464,27 @@ export async function renderTwitch(main) {
 
 function clientIdCard(status, collapsed = false) {
   const input = h('input', { type: 'text', value: status.client_id || '', placeholder: 'your application client id' });
+  // A release build ships WheelHat's own application, so registering one is an
+  // option rather than a first step. A build from source has nothing bundled
+  // and still needs one, which is why the walkthrough stays.
+  const bundled = Boolean(status.using_bundled_client_id);
+  const heading = bundled
+    ? 'Use your own Twitch application (optional)'
+    : collapsed
+      ? 'Twitch application'
+      : 'Step 1 — register a Twitch application';
   return h(
     'div.card',
-    h('h2', collapsed ? 'Twitch application' : 'Step 1 — register a Twitch application'),
-    collapsed
+    h('h2', heading),
+    bundled
+      ? h(
+          'p.card-hint',
+          'WheelHat is signing in through its own Twitch application, so there is '
+            + 'nothing to register. Paste a Client ID here only if you would rather '
+            + 'use your own; clear it to go back to the built-in one.'
+        )
+      : null,
+    collapsed || bundled
       ? null
       : h(
           'div',
@@ -479,7 +496,7 @@ function clientIdCard(status, collapsed = false) {
             'ol.muted',
             { style: { marginTop: 0, paddingLeft: '20px', lineHeight: '1.9' } },
             h('li', 'Open the ', h('a', { href: 'https://dev.twitch.tv/console/apps/create', target: '_blank', rel: 'noreferrer' }, 'Twitch developer console'), ' and register a new application.'),
-            h('li', 'Name it anything. Set the OAuth Redirect URL to ', h('code.mono', 'http://localhost'), '.'),
+            h('li', 'Name it anything. An OAuth Redirect URL is required to create the app but the device code flow never uses it - ', h('code.mono', 'http://localhost'), ' is fine.'),
             h('li', 'Choose category "Application Integration" and client type ', h('strong', 'Public'), '.'),
             h('li', 'Copy the Client ID and paste it below.')
           )
@@ -492,15 +509,16 @@ function clientIdCard(status, collapsed = false) {
         'button.btn.primary',
         {
           onclick: guard(async () => {
-            if (!input.value.trim()) {
+            const value = input.value.trim();
+            if (!value && !bundled) {
               toast('Paste your Client ID first', 'bad');
               return;
             }
-            await api.post('/twitch/client-id', { client_id: input.value.trim() });
-            toast('Client ID saved', 'ok');
+            await api.post('/twitch/client-id', { client_id: value });
+            toast(value ? 'Client ID saved' : 'Using the built-in application', 'ok');
           }),
         },
-        'Save Client ID'
+        bundled && !input.value.trim() ? 'Save' : 'Save Client ID'
       )
     )
   );

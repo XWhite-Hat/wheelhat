@@ -1,6 +1,7 @@
 """HTTP API behaviour, driven through the ASGI app directly."""
 
 import json
+import pathlib
 
 import httpx
 import pytest
@@ -218,3 +219,188 @@ async def test_unsupported_integration_kind_is_rejected(client):
         "/api/integrations", json={"kind": "nonsense", "host": "x", "port": 1}
     )
     assert response.status_code == 422
+
+
+async def test_slice_colours_round_trip_and_reach_the_overlay(client):
+    """Per-slice label and inline colours have to survive a save and be sent on.
+
+    text_color existed on the model but had no way in and was never asserted;
+    a field the overlay never receives is invisible however well it is stored.
+    """
+    made = (await client.post("/api/wheels", json={})).json()
+    made["slices"][0]["text_color"] = "#101010"
+    made["slices"][0]["border_color"] = "#ff00ff"
+    made["slices"][0]["text_stroke_color"] = "#00ff00"
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+
+    assert saved["slices"][0]["text_color"] == "#101010"
+    assert saved["slices"][0]["border_color"] == "#ff00ff"
+    assert saved["slices"][0]["text_stroke_color"] == "#00ff00"
+
+    # Unset stays unset rather than defaulting to a colour.
+    assert saved["slices"][1]["border_color"] is None
+    assert saved["slices"][1]["text_color"] is None
+    assert saved["slices"][1]["text_stroke_color"] is None
+
+    from wheelhat.engine import render_payload
+
+    payload = render_payload(db.get_wheel(made["id"]))
+    assert payload["slices"][0]["border_color"] == "#ff00ff"
+    assert payload["slices"][0]["text_color"] == "#101010"
+    assert payload["slices"][0]["text_stroke_color"] == "#00ff00"
+
+
+async def test_source_size_and_result_position_round_trip(client):
+    """Each wheel records the browser source it is built for, and where the
+    winner banner sits, so the overlay can reserve room for it up front."""
+    made = (await client.post("/api/wheels", json={})).json()
+    assert made["appearance"]["source_width"] == 1280
+    assert made["appearance"]["source_height"] == 720
+    assert made["appearance"]["result_position"] == "under"
+
+    made["appearance"]["source_width"] = 1080
+    made["appearance"]["source_height"] = 1080
+    made["appearance"]["result_position"] = "over"
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+
+    assert saved["appearance"]["source_width"] == 1080
+    assert saved["appearance"]["source_height"] == 1080
+    assert saved["appearance"]["result_position"] == "over"
+
+    from wheelhat.engine import render_payload
+
+    payload = render_payload(db.get_wheel(made["id"]))
+    assert payload["appearance"]["result_position"] == "over"
+    assert payload["appearance"]["source_width"] == 1080
+
+
+async def test_result_position_rejects_anything_else(client):
+    """The overlay branches on this value, so a typo must not reach it."""
+    made = (await client.post("/api/wheels", json={})).json()
+    made["appearance"]["result_position"] = "sideways"
+    response = await client.put(f"/api/wheels/{made['id']}", json=made)
+    assert response.status_code == 422
+
+
+async def test_bundled_client_id_is_used_when_the_user_has_not_set_one(monkeypatch):
+    """A release build ships an application id so nobody has to register one."""
+    from wheelhat.twitch import client_id as client_id_module
+    from wheelhat.twitch.service import TwitchService
+
+    monkeypatch.setattr(client_id_module, "BUNDLED_CLIENT_ID", "bundledid123")
+    monkeypatch.delenv(client_id_module.ENV_VAR, raising=False)
+
+    service = TwitchService()
+    assert service._resolve_client_id() == "bundledid123"
+    assert service.status()["client_id"] == ""
+
+
+async def test_a_saved_client_id_overrides_the_bundled_one(monkeypatch):
+    """Anyone who would rather use their own application still can."""
+    from wheelhat.twitch import client_id as client_id_module
+    from wheelhat.twitch.service import TwitchService
+
+    monkeypatch.setattr(client_id_module, "BUNDLED_CLIENT_ID", "bundledid123")
+    monkeypatch.delenv(client_id_module.ENV_VAR, raising=False)
+
+    service = TwitchService()
+    await service.set_client_id("myownid456")
+    assert service.client_id == "myownid456"
+    assert service.status()["client_id"] == "myownid456"
+    assert service.status()["using_bundled_client_id"] is False
+
+    # Clearing it falls back rather than leaving Twitch unusable.
+    await service.set_client_id("")
+    assert service.client_id == "bundledid123"
+    assert service.status()["using_bundled_client_id"] is True
+
+
+async def test_the_environment_overrides_the_baked_in_id(monkeypatch):
+    """So a developer can point a normal build at their own app."""
+    from wheelhat.twitch import client_id as client_id_module
+
+    monkeypatch.setattr(client_id_module, "BUNDLED_CLIENT_ID", "bundledid123")
+    monkeypatch.setenv(client_id_module.ENV_VAR, "fromenv789")
+    assert client_id_module.bundled() == "fromenv789"
+
+
+def test_no_client_id_is_committed_to_the_repository():
+    """The literal is injected at build time and must stay out of git.
+
+    Not secrecy - a client id is public and ships readable in the binary. This
+    keeps forks from inheriting this project's identity and rate limits, and
+    catches a local release build being committed by accident.
+    """
+    from wheelhat.twitch import client_id as client_id_module
+
+    source = pathlib.Path(client_id_module.__file__).read_text(encoding="utf-8")
+    assert 'BUNDLED_CLIENT_ID = ""' in source, "a client id was committed; inject it at build instead"
+
+
+async def test_changing_the_twitch_application_signs_the_old_session_out(monkeypatch):
+    """A token only works with the client id that obtained it.
+
+    Keeping it across an application change left the UI reporting a live
+    session while every Twitch call failed - signed in by appearance only.
+    """
+    from wheelhat.twitch import client_id as client_id_module
+    from wheelhat.twitch.auth import Tokens
+    from wheelhat.twitch.service import TwitchService
+
+    monkeypatch.setattr(client_id_module, "BUNDLED_CLIENT_ID", "bundledid123")
+    monkeypatch.delenv(client_id_module.ENV_VAR, raising=False)
+
+    service = TwitchService()
+    service.client_id = service._resolve_client_id()
+    service.tokens = Tokens(access_token="tok", refresh_token="ref", client_id="bundledid123")
+    service.tokens.save()
+
+    revoked: list[tuple[str, str]] = []
+
+    async def fake_revoke(cid, token):
+        revoked.append((cid, token))
+
+    monkeypatch.setattr("wheelhat.twitch.service.auth.revoke", fake_revoke)
+
+    await service.set_client_id("myownid456")
+
+    assert service.client_id == "myownid456"
+    assert not service.tokens.valid, "the stale token should have been cleared"
+    assert service.status()["signed_in"] is False
+    # Revoked against the application that issued it, not the new one.
+    assert revoked == [("bundledid123", "tok")]
+
+
+async def test_a_token_from_another_application_is_discarded_on_startup(monkeypatch):
+    """Covers the upgrade: a build that starts shipping its own application
+    must not present a token issued to a different one as a live session."""
+    from wheelhat.twitch import client_id as client_id_module
+    from wheelhat.twitch.auth import Tokens
+    from wheelhat.twitch.service import TwitchService
+
+    monkeypatch.setattr(client_id_module, "BUNDLED_CLIENT_ID", "bundledid123")
+    monkeypatch.delenv(client_id_module.ENV_VAR, raising=False)
+    Tokens(access_token="tok", refresh_token="ref", client_id="someotherapp").save()
+
+    service = TwitchService()
+    await service.start()
+
+    assert not service.tokens.valid
+    assert Tokens.load().access_token == ""
+
+
+async def test_a_token_saved_before_this_was_recorded_is_kept(monkeypatch):
+    """Existing users must not be signed out by the upgrade itself."""
+    from wheelhat.twitch import client_id as client_id_module
+    from wheelhat.twitch.auth import Tokens
+    from wheelhat.twitch.service import TwitchService
+
+    monkeypatch.setattr(client_id_module, "BUNDLED_CLIENT_ID", "bundledid123")
+    monkeypatch.delenv(client_id_module.ENV_VAR, raising=False)
+    # No client_id field, as saved by an older build.
+    Tokens(access_token="tok", refresh_token="ref").save()
+
+    service = TwitchService()
+    service.client_id = service._resolve_client_id()
+    service.tokens = Tokens.load()
+    assert service.tokens.valid, "a legacy token has no application recorded and must be kept"

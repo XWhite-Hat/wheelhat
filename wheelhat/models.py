@@ -79,6 +79,11 @@ class Slice(BaseModel):
     weight: float = 1.0
     color: Optional[str] = None
     text_color: Optional[str] = None
+    #: Inline colour for this wedge. Falls back to the wheel's own setting.
+    border_color: Optional[str] = None
+    #: Label outline colour. Falls back to the wheel's own setting. The
+    #: outline is only drawn when the wheel gives it a width.
+    text_stroke_color: Optional[str] = None
     image: SliceImage = Field(default_factory=SliceImage)
     enabled: bool = True
     # Temporarily disable this slice after it wins (0 = never).
@@ -123,6 +128,11 @@ class Appearance(BaseModel):
     label_max_chars: int = 22
     size: int = 720
     background: str = "transparent"
+    #: The browser source this wheel is designed for. Nothing is forced to these
+    #: numbers - the overlay always fits whatever size the source really is -
+    #: but they drive the editor preview's shape and the sizes we recommend.
+    source_width: int = 1280
+    source_height: int = 720
 
     # -- wedge shape ---------------------------------------------------------
     #: Gap between wedges, in degrees. Turns the wheel into separated segments.
@@ -162,6 +172,11 @@ class Appearance(BaseModel):
     show_title: bool = True
     show_result: bool = True
     result_duration_ms: int = 5000
+    #: Where the winner banner sits. "under" keeps it below the wheel and
+    #: reserves the room whether or not it is showing, so the wheel never
+    #: changes size when a result appears. "over" floats it across the wheel,
+    #: which needs no reserved space at all.
+    result_position: Literal["under", "over"] = "under"
     # Hide the wheel entirely between spins - handy for a browser source that
     # should only appear when something is actually happening.
     hide_when_idle: bool = False

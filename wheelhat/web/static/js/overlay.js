@@ -5,7 +5,7 @@
  * Nothing here decides a winner; that keeps every open source in agreement.
  */
 
-import { WheelRenderer } from './wheel-canvas.js';
+import { RESULT_BAND, TITLE_BAND, WheelRenderer } from './wheel-canvas.js';
 
 const wheelId = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
 const params = new URLSearchParams(location.search);
@@ -44,23 +44,37 @@ function scheduleLayoutRetry() {
 }
 
 
+/** True when the winner banner takes its own space below the wheel. */
+function resultIsUnder() {
+  return (
+    appearance.show_result !== false &&
+    (params.get('result') || appearance.result_position || 'under') !== 'over'
+  );
+}
+
 function layout() {
   const configured = Number(params.get('size') || appearance.size || 0);
   const root = document.documentElement;
-  const available = Math.min(
-    root.clientWidth || window.innerWidth,
-    root.clientHeight || window.innerHeight
-  );
-  if (available <= 0) {
+  const width = root.clientWidth || window.innerWidth;
+  const height = root.clientHeight || window.innerHeight;
+  if (width <= 0 || height <= 0) {
     // The source has no size yet. Timers still fire when frame callbacks and
     // resize observers do not, so poll briefly rather than waiting forever.
     scheduleLayoutRetry();
     return;
   }
 
-  // Leave room for the title and result pill without ever exceeding the source.
-  const chrome = (titleEl.hidden ? 0 : 52) + (resultEl.hidden ? 0 : 84);
-  const size = Math.max(120, Math.min(configured || available, available - chrome));
+  // Reserve the title and banner from the wheel's *settings*, never from what
+  // happens to be on screen. Measuring visibility meant the wheel shrank the
+  // moment a winner appeared and grew back when it faded - the wheel visibly
+  // resizing on every spin. Reserved up front, the wheel is one fixed size.
+  const showTitle = appearance.show_title !== false && params.get('title') !== '0';
+  const chrome = (showTitle ? TITLE_BAND : 0) + (resultIsUnder() ? RESULT_BAND : 0);
+
+  // Only the height is spent on chrome, so a tall narrow source still gets a
+  // wheel as wide as it will go.
+  const fits = Math.min(width, height - chrome);
+  const size = Math.max(120, configured > 0 ? Math.min(configured, fits) : fits);
   if (size === lastSize) return;
   layoutAttempts = 0;
   lastSize = size;
@@ -84,6 +98,8 @@ function applyState(state) {
 
   const showTitle = appearance.show_title !== false && params.get('title') !== '0';
   titleEl.hidden = !showTitle;
+  // Drives whether the banner sits in the column or floats over the wheel.
+  stage.dataset.result = resultIsUnder() ? 'under' : 'over';
   titleEl.textContent = state.name || '';
 
   if (appearance.background && appearance.background !== 'transparent') {
@@ -130,6 +146,40 @@ async function runSpin(payload) {
 
   stage.dataset.state = 'result';
   showResult(payload.winner, payload.slices?.[payload.target_index]);
+}
+
+/**
+ * Catch up with a spin that is already running.
+ *
+ * A source can connect part-way through a spin - OBS reconnects, or the scene
+ * is switched back mid-spin. Cutting straight to the winner gives the result
+ * away early and leaves the wheel disagreeing with the banner, so animate
+ * whatever is left instead. The spin id is passed through, so this lands on the
+ * same off-centre spot as the sources that watched the whole thing.
+ */
+async function resumeSpin(payload) {
+  const remaining = Number(payload.stops_in_ms || 0);
+  if (remaining < 120) {
+    // Practically over already: place the wheel rather than animate a blur.
+    renderer.settleOn(payload.winner_id);
+    stage.dataset.state = 'result';
+    showResult(payload.winner);
+    return;
+  }
+
+  wake();
+  hideResult();
+  stage.dataset.state = 'spinning';
+  await renderer.spin({
+    targetIndex: payload.winner_id,
+    durationMs: remaining,
+    // The tail of a spin, not a fresh one - keep the turns proportionate.
+    turns: Math.max(1, Math.round(remaining / 1200)),
+    easing: 'easeOutQuint',
+    spinId: payload.spin_id,
+  });
+  stage.dataset.state = 'result';
+  showResult(payload.winner);
 }
 
 function showResult(winner, slice) {
@@ -208,9 +258,7 @@ function connect() {
         runSpin(payload);
         break;
       case 'spin_resync':
-        // Reloaded mid-spin: skip the animation and show where it ended up.
-        stage.dataset.state = 'result';
-        showResult(payload.winner);
+        resumeSpin(payload);
         break;
       case 'spin_cancelled':
         stage.dataset.state = 'idle';

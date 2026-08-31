@@ -29,6 +29,26 @@ First release.
   to repair it instead of crashing.
 - `%LOCALAPPDATA%\WheelHat\bootstrap.log` records what setup did, so a failed
   first run can actually be diagnosed.
+- Switching Twitch application now signs the previous session out instead of
+  leaving a stored token that reports as connected while every call fails.
+- Released builds carry their own Twitch application, so signing in no longer
+  starts with registering one. A client id can still be supplied to override it,
+  and clearing that field returns to the built-in application.
+- Each wheel records the browser source size it is built for, with a
+  recommended size that fits every element without cropping.
+- A frame image that reaches past the wheel is no longer cropped by the edge of
+  the source; the wheel makes room for it.
+- The winner banner can sit underneath the wheel or on top of it, and the
+  underneath position reserves its room so the wheel never resizes or jumps
+  when a result appears.
+- Wedge borders are drawn as inlines, inside each wedge, so two neighbouring
+  wedges meet rather than both painting the shared edge.
+- Label colour, inline colour and label outline colour can be set per slice,
+  each with an Auto switch that falls back to the wheel's own setting.
+- Text and other decorations scale with the wheel, so a label that fits one
+  browser source fits at any size - and the editor preview matches the overlay.
+- A browser source that connects mid-spin animates the rest of the spin and
+  lands on the winner, instead of showing the result with the wheel at rest.
 - Image layers on wheels: per-slice art, plus background, hub, pointer and a
   frame overlay that is drawn on top of the wheel and does not spin with it.
   Every layer has scale, opacity, rotation and offset controls.

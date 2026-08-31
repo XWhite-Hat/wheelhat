@@ -13,6 +13,7 @@ from ..httpclient import client
 from ..hub import hub
 from . import auth
 from .auth import AuthError, DeviceFlow, Tokens
+from .client_id import bundled
 from .eventsub import EventSubClient
 
 log = logging.getLogger("wheelhat.twitch")
@@ -98,8 +99,17 @@ class TwitchService:
     # ----------------------------------------------------------------- startup
 
     async def start(self) -> None:
-        self.client_id = db.get_setting(CLIENT_ID_KEY, "") or ""
+        self.client_id = self._resolve_client_id()
         self.tokens = Tokens.load()
+
+        # Tokens saved by a different application cannot be used or refreshed.
+        # This is the upgrade path too: a build that starts shipping its own
+        # application must not present someone else's stale token as a session.
+        if self.tokens.valid and self.tokens.client_id and self.tokens.client_id != self.client_id:
+            log.info("Stored Twitch token belongs to another application; discarding it")
+            Tokens.clear()
+            self.tokens = Tokens()
+
         if not (self.client_id and self.tokens.valid):
             return
         try:
@@ -122,9 +132,32 @@ class TwitchService:
 
     # -------------------------------------------------------------------- auth
 
+    def _resolve_client_id(self) -> str:
+        """A saved id wins over the one this build ships with.
+
+        Most people never set one and use WheelHat's own application. Anyone
+        who would rather run their own - or who is building from source,
+        where nothing is bundled - saves theirs and it takes over.
+        """
+        return (db.get_setting(CLIENT_ID_KEY, "") or "").strip() or bundled()
+
     async def set_client_id(self, client_id: str) -> None:
-        self.client_id = client_id.strip()
-        db.set_setting(CLIENT_ID_KEY, self.client_id)
+        # Saving an empty value clears the override and falls back to the
+        # bundled application rather than leaving Twitch unusable.
+        previous = self.client_id
+        db.set_setting(CLIENT_ID_KEY, client_id.strip())
+        resolved = self._resolve_client_id()
+
+        # A token belongs to the application that obtained it. Swapping the
+        # application while keeping the token leaves the UI saying "signed in"
+        # while every Helix call 401s and every refresh 400s, so sign out first
+        # - and do it before self.client_id moves, so the revoke reaches Twitch
+        # with the id the token was actually issued to.
+        if resolved != previous and self.tokens.valid:
+            log.info("Twitch application changed; signing out the previous session")
+            await self.logout()
+
+        self.client_id = resolved
         await self.broadcast_status()
 
     async def begin_login(self) -> dict[str, Any]:
@@ -387,7 +420,10 @@ class TwitchService:
         missing = [s for s in config.TWITCH_SCOPES if s not in (self.tokens.scopes or [])]
         return {
             "client_id_set": bool(self.client_id),
-            "client_id": self.client_id,
+            # Only ever the user's own id. The bundled one is not shown: it is
+            # not theirs to edit, and prefilling it invites accidental changes.
+            "client_id": (db.get_setting(CLIENT_ID_KEY, "") or "").strip(),
+            "using_bundled_client_id": bool(self.client_id) and self.client_id == bundled(),
             "signed_in": bool(self.tokens.valid and self.tokens.user_id),
             "login": self.tokens.login,
             "display_name": self.tokens.display_name,

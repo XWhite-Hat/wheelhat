@@ -34,7 +34,13 @@ class ActiveSpin:
     wheel_id: str
     winner: str
     started_at: float
+    # ends_at covers the action delay too; stops_at is when the wheel itself
+    # comes to rest, which is what a reconnecting overlay has to animate to.
     ends_at: float
+    stops_at: float = 0.0
+    # An overlay that connects mid-spin needs to know which slice to stop on,
+    # and an id survives a list that has changed shape since the spin began.
+    winner_id: str = ""
     task: Optional[asyncio.Task] = field(default=None, repr=False)
 
 
@@ -46,6 +52,8 @@ def slice_payload(slices: list[Slice]) -> list[dict[str, Any]]:
             "weight": max(s.weight, 0.0001),
             "color": s.color,
             "text_color": s.text_color,
+            "border_color": s.border_color,
+            "text_stroke_color": s.text_stroke_color,
             "image": s.image.model_dump(),
         }
         for s in slices
@@ -163,8 +171,10 @@ class SpinEngine:
                 spin_id=spin_id,
                 wheel_id=wheel_id,
                 winner=winner.label,
+                winner_id=winner.id,
                 started_at=now,
                 ends_at=now + (duration + delay) / 1000,
+                stops_at=now + duration / 1000,
             )
             self._active[wheel_id] = active
             self._last_spin_at[wheel_id] = now

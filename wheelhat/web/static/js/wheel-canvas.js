@@ -10,6 +10,18 @@ import { containSize, coverSize, getImage, onImageSettled } from './image-cache.
 
 const TAU = Math.PI * 2;
 const POINTER_ANGLE = -Math.PI / 2; // 12 o'clock
+// Diameter, in CSS pixels, that the sizes stored on a wheel (font_size,
+// rim_width, stroke widths) are expressed in. Everything is scaled from here.
+const REFERENCE_SIZE = 600;
+
+// Vertical room the overlay reserves for the title and the winner banner.
+// Exported so the overlay's layout and the editor's recommendation cannot
+// drift apart and start disagreeing about what fits.
+export const TITLE_BAND = 52;
+export const RESULT_BAND = 84;
+export const EDGE_PADDING = 24;
+// Matches Appearance.size in models.py - the wheel size a new wheel starts at.
+export const DEFAULT_WHEEL_SIZE = 720;
 
 const EASINGS = {
   easeOutQuint: (t) => 1 - Math.pow(1 - t, 5),
@@ -65,6 +77,50 @@ const DEFAULT_APPEARANCE = {
 /** A layer is worth drawing only when it has a URL, is on, and is visible. */
 function layerActive(layer) {
   return Boolean(layer && layer.url && layer.enabled !== false && (layer.opacity ?? 1) > 0);
+}
+
+/**
+ * How far past the wheel and its rim the frame image reaches.
+ *
+ * The frame is fitted to the wheel plus rim, then its own scale and offset
+ * are applied on top - so a frame larger than 1 extends beyond the wheel and,
+ * without headroom, is cropped by the edge of the browser source.
+ */
+export function frameHeadroom(appearance = {}) {
+  const frame = appearance.frame_image;
+  if (!layerActive(frame)) return { scale: 1, offset: 0 };
+  return {
+    scale: Math.max(1, Number(frame.scale) || 1),
+    offset: Math.max(Math.abs(frame.offset_x || 0), Math.abs(frame.offset_y || 0)),
+  };
+}
+
+/**
+ * Wheel radius that leaves room for the rim and any frame drawn around it.
+ *
+ * The frame is fitted to (radius + rim) and then multiplied by its own scale
+ * and shifted by its own offset, so the furthest it reaches from the centre is
+ * (radius + rim) * scale + offset * radius. Solving that against the half-size
+ * of the canvas is what keeps the frame inside the source instead of cropped.
+ */
+export function wheelRadius(size, appearance, scale) {
+  const headroom = frameHeadroom(appearance);
+  const rim = (appearance.rim_width || 0) * scale;
+  return (size / 2 - 6 * scale - rim * headroom.scale) / (headroom.scale + headroom.offset);
+}
+
+/** The browser source size that fits this wheel with nothing cropped. */
+export function recommendedSource(appearance = {}) {
+  const wheel = Math.max(120, Number(appearance.size) || DEFAULT_WHEEL_SIZE);
+  const headroom = frameHeadroom(appearance);
+  const box = Math.ceil(wheel * (headroom.scale + headroom.offset));
+  const title = appearance.show_title === false ? 0 : TITLE_BAND;
+  const under =
+    appearance.show_result !== false && (appearance.result_position || 'under') !== 'over';
+  return {
+    width: box + EDGE_PADDING * 2,
+    height: box + title + (under ? RESULT_BAND : 0) + EDGE_PADDING * 2,
+  };
 }
 
 /** Clamp into a range; the editor lets people type anything. */
@@ -157,6 +213,11 @@ export class WheelRenderer {
     });
   }
 
+  /** The inline colour for a wedge: its own, or the wheel's default. */
+  borderColorFor(slice) {
+    return slice.border_color || this.appearance.slice_border_color || 'rgba(0,0,0,0.18)';
+  }
+
   colorFor(slice, index) {
     if (slice.color) return slice.color;
     const palette = this.appearance.palette?.length ? this.appearance.palette : DEFAULT_PALETTE;
@@ -185,9 +246,16 @@ export class WheelRenderer {
     const ctx = this.ctx;
     const size = this.canvas.width;
     if (!size) return;
-    const scale = this._dpr;
+    // Scale decorations with the wheel, not with the display density. Using the
+    // device pixel ratio alone pinned text to a fixed CSS size however big the
+    // wheel was: a label that sat comfortably in an OBS source overran the hub
+    // in the small editor preview, and looked lost on a large source.
+    const scale = size / REFERENCE_SIZE;
     const look = this.appearance;
-    const radius = size / 2 - look.rim_width * scale - 6 * scale;
+    // Leave room for a frame that reaches past the wheel. Without this the
+    // frame is drawn to the canvas edge and its outer edges are simply cropped,
+    // because the canvas only ever had a few pixels of slack around the rim.
+    const radius = wheelRadius(size, look, scale);
     const cx = size / 2;
     const cy = size / 2;
 
@@ -296,9 +364,18 @@ export class WheelRenderer {
     ctx.fill();
 
     if ((look.slice_border_width || 0) > 0) {
-      ctx.lineWidth = look.slice_border_width * scale;
-      ctx.strokeStyle = look.slice_border_color || 'rgba(0,0,0,0.18)';
+      // An inline, not an outline: clip to this wedge and stroke at double
+      // width so only the inner half survives. A centred stroke puts half its
+      // width in the neighbouring wedge, so two touching wedges both paint the
+      // shared edge - it ends up thicker than the outer edges, and twice as
+      // dark with a semi-transparent colour. Clipped, each wedge owns its own
+      // border and neighbouring inlines simply meet.
+      ctx.save();
+      ctx.clip();
+      ctx.lineWidth = look.slice_border_width * scale * 2;
+      ctx.strokeStyle = this.borderColorFor(entry.slice);
       ctx.stroke();
+      ctx.restore();
     }
 
     if (index === this.highlightIndex) {
@@ -394,10 +471,15 @@ export class WheelRenderer {
       ctx.shadowBlur = 3 * scale;
     }
     const strokeWidth = (look.text_stroke_width || 0) * scale;
-    const stroking = strokeWidth > 0 && Boolean(look.text_stroke_color);
+    // A slice may override the outline colour; the width stays a wheel-wide
+    // setting so labels keep a consistent weight. Resolve before deciding
+    // whether to stroke, or a slice colour would be ignored when the wheel
+    // itself has no outline colour set.
+    const strokeColor = entry.slice.text_stroke_color || look.text_stroke_color;
+    const stroking = strokeWidth > 0 && Boolean(strokeColor);
     if (stroking) {
       ctx.lineWidth = strokeWidth;
-      ctx.strokeStyle = look.text_stroke_color;
+      ctx.strokeStyle = strokeColor;
       ctx.lineJoin = 'round';
     }
 
@@ -549,10 +631,12 @@ export class WheelRenderer {
   spin({ targetIndex, durationMs = 6000, turns = 6, easing = 'easeOutQuint', spinId = '' }) {
     const geo = this.geometry();
     if (!geo.length) return Promise.resolve();
-    const target = geo[Math.max(0, Math.min(targetIndex, geo.length - 1))];
+    const index = this._resolveIndex(targetIndex, geo);
+    if (index < 0) return Promise.resolve();
+    const target = geo[index];
 
     // Land off-centre by a deterministic amount so it does not look robotic.
-    const jitter = (hashUnit(spinId || String(targetIndex)) - 0.5) * target.span * 0.7;
+    const jitter = (hashUnit(spinId || String(index)) - 0.5) * target.span * 0.7;
     const desired = POINTER_ANGLE - (target.center + jitter);
     const current = this.rotation;
     let delta = (desired - current) % TAU;
@@ -576,7 +660,7 @@ export class WheelRenderer {
         this._frame = null;
         this.rotation = final % TAU;
         this.spinning = false;
-        this.highlightIndex = targetIndex;
+        this.highlightIndex = index;
         this.draw();
         this._ensureLoop();
         this._resolveSpin = null;
@@ -606,12 +690,25 @@ export class WheelRenderer {
     });
   }
 
-  /** Jump straight to a result, for a browser source that reloaded mid-spin. */
-  settleOn(targetIndex) {
+  /** Resolve a slice id or an index against the current geometry. -1 if unknown.
+   *
+   * A slice id is accepted as well as an index because on a reconnect the
+   * overlay builds its own slice list, which need not be the one the spin
+   * indexed - matching by id is the only way to be sure of the winning wedge.
+   */
+  _resolveIndex(target, geo) {
+    if (!geo.length) return -1;
+    if (typeof target === 'number') return Math.max(0, Math.min(target, geo.length - 1));
+    return geo.findIndex((entry) => entry.slice.id === target);
+  }
+
+  /** Jump straight to a result, without animating. */
+  settleOn(target) {
     const geo = this.geometry();
-    if (!geo.length) return;
-    const target = geo[Math.max(0, Math.min(targetIndex, geo.length - 1))];
-    this.rotation = POINTER_ANGLE - target.center;
+    const targetIndex = this._resolveIndex(target, geo);
+    if (targetIndex < 0) return;
+    const entry = geo[targetIndex];
+    this.rotation = POINTER_ANGLE - entry.center;
     this.spinning = false;
     this.highlightIndex = targetIndex;
     this.draw();

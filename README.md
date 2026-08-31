@@ -118,8 +118,35 @@ the wheel radius, so a layout survives the source being resized. Slice images ad
 
 The **Look** tab covers the rest: a gap between wedges to turn the pie into
 separated segments, a centre hole to make it a ring, shading towards the hub,
-wedge borders, and label controls — curved text that follows the wedge,
+wedge inlines, and label controls — curved text that follows the wedge,
 uppercase, outline, shadow, and how far out the label sits.
+
+Wedge borders are drawn as **inlines**, inside each wedge rather than centred on
+its edge. Two neighbouring wedges therefore meet inline-to-inline instead of both
+painting the shared edge, which would otherwise leave it thicker than the outer
+edges and — with a semi-transparent colour — twice as dark.
+
+Three of those colours can also be set **per slice**, on the slice itself: its
+label colour, its inline colour, and its label outline colour. Each has an
+**Auto** switch: leave it on and the slice follows the wheel (label colour picks
+black or white automatically for contrast against the wedge), turn it off to
+pick a colour for that one slice.
+
+### Sizing the browser source
+
+Each wheel records the browser source size it is designed for, on the **Look**
+tab, with a **recommended** size beside it that fits the wheel, the title, the
+winner banner and any frame with nothing cropped. WheelHat always fits whatever
+size the source really is - these are there so OBS and the wheel agree.
+
+A frame reaching past the wheel used to be cropped by the edge of the source,
+because the canvas only kept a few pixels of slack around the rim. The wheel now
+makes room for however far the frame's scale and offset push it.
+
+The winner banner can sit **underneath** the wheel or **on top of** it. Underneath
+keeps its row reserved whether or not a winner is showing, so the wheel is one
+fixed size and neither resizes nor jumps when a result appears; on top floats it
+across the wheel and leaves the full height of the source for the wheel itself.
 
 Assets live in your data folder (the path is on the Settings page) and are served
 from `/assets`. PNG, JPG, GIF, WebP and SVG are accepted up to 8 MB, along with
@@ -274,15 +301,39 @@ All of them support a global cooldown and a per-viewer cooldown.
 
 ### Signing in to Twitch
 
-WheelHat uses your own Twitch application and the device code flow, so no
-password or secret ever passes through this app:
+WheelHat signs in with the device code flow, so no password or secret ever
+passes through this app. Press **Sign in with Twitch**, then enter the short
+code shown at `twitch.tv/activate`. That is the whole process — a released
+build carries its own Twitch application, so there is nothing to register.
+
+Twitch [documents the client id as public](https://dev.twitch.tv/docs/authentication/register-app)
+("considered public and can be embedded in a web page's source") and recommends
+the **public** client type for apps "on a more open platform (such as windows)",
+which is exactly this. There is no client *secret* anywhere in WheelHat, and a
+public client does not need one.
+
+**Using your own application instead.** Optional, and worth doing if you want
+your own name on the consent screen or your own rate limits:
 
 1. Register an app at the [Twitch developer console](https://dev.twitch.tv/console/apps/create).
-   Redirect URL `http://localhost`, category *Application Integration*, client
-   type **Public**.
-2. Paste the Client ID into **Twitch → Step 1**.
-3. Press **Sign in with Twitch**, then enter the short code shown at
-   `twitch.tv/activate`.
+   Category *Application Integration*, client type **Public**.
+2. Paste the Client ID into **Twitch → Use your own Twitch application**.
+   Clearing that field goes back to the built-in one.
+
+The console **requires** an OAuth Redirect URL before it will create the app,
+but the device code flow never sends one — it posts only the client id, the
+scopes and the device code. So the field has to be filled in and is then never
+used; `http://localhost` is the usual filler. Only the **client type** matters: it has
+to be *Public*, which is the type Twitch recommends for desktop apps anyway.
+
+Builds from source carry no application id, so they ask for one — set
+`WHEELHAT_TWITCH_CLIENT_ID` or save it in the app.
+
+**No Twitch registration at all.** If you already run Streamer.bot, Mix It Up,
+Firebot or SAMMI, they hold your Twitch authentication already. Point a channel
+point redeem at a wheel's trigger URL
+(`http://localhost:8777/api/wheels/<id>/trigger?user=$user`) and you never have
+to connect WheelHat to Twitch.
 
 WheelHat only subscribes to the EventSub topics your wheels actually use — add a
 bits trigger and it starts listening for bits, not before.
@@ -380,7 +431,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 204 tests
+.venv\Scripts\python -m pytest          # 216 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

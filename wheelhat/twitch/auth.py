@@ -1,8 +1,14 @@
 """Twitch OAuth via the device code grant.
 
 Device flow is the right fit for a desktop tool: it is designed for public
-clients, so the streamer only has to paste a client id - there is no secret to
-store on their machine, and no redirect URI to register.
+clients, so there is no secret to store on anyone's machine.
+
+Nor is there a redirect to get right. The only parameters Twitch takes are
+client_id and scopes to start the flow, then client_id, scopes, device_code and
+grant_type to redeem it - no redirect_uri in either. The developer console does
+require a redirect URL before it will create an application, so every app has
+one on file, but this flow never sends it and it is never matched against
+anything. Whatever is in that field makes no difference here.
 """
 
 from __future__ import annotations
@@ -33,6 +39,11 @@ class Tokens:
     user_id: str = ""
     login: str = ""
     display_name: str = ""
+    #: The application these tokens were issued to. A token is only usable with
+    #: the client id that obtained it, so this is what lets a stored token be
+    #: recognised as stale when the application changes. Empty on tokens saved
+    #: before this was recorded, which are assumed to still match.
+    client_id: str = ""
 
     @property
     def valid(self) -> bool:
@@ -51,6 +62,7 @@ class Tokens:
             "user_id": self.user_id,
             "login": self.login,
             "display_name": self.display_name,
+            "client_id": self.client_id,
         }
 
     @classmethod
@@ -125,6 +137,7 @@ async def poll_device_token(client_id: str, flow: DeviceFlow, scopes: Optional[l
             refresh_token=payload.get("refresh_token", ""),
             expires_at=time.time() + int(payload.get("expires_in", 14400)),
             scopes=payload.get("scope", []) or [],
+            client_id=client_id,
         )
 
     body = _safe_json(response)
@@ -165,6 +178,9 @@ async def refresh(client_id: str, tokens: Tokens) -> Tokens:
     tokens.refresh_token = payload.get("refresh_token", tokens.refresh_token)
     tokens.expires_at = time.time() + int(payload.get("expires_in", 14400))
     tokens.scopes = payload.get("scope", tokens.scopes) or tokens.scopes
+    # Twitch accepted the refresh, which proves the token belongs to this
+    # application. Stamping it labels tokens saved before this was recorded.
+    tokens.client_id = client_id
     tokens.save()
     return tokens
 

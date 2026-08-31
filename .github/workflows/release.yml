@@ -44,6 +44,31 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[bootstrap]"
           python -m pip install pyinstaller==6.11.1
+      - name: Bake in the Twitch application id
+        # A client id is public by design - Twitch documents it as embeddable,
+        # and it ships readable inside every binary. It is kept out of the
+        # repository only so forks do not inherit this project's identity and
+        # rate limits. Never put a client *secret* here: WheelHat authenticates
+        # as a public client over the device code flow and has no use for one.
+        #
+        # An unset secret is not a failure. The build simply carries no id and
+        # asks the user for theirs, which is what a source build does anyway.
+        shell: pwsh
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+        run: |
+          $id = "$env:TWITCH_CLIENT_ID".Trim()
+          if (-not $id) {
+            Write-Host "::warning::No TWITCH_CLIENT_ID secret; this build will ask users for their own."
+            exit 0
+          }
+          if ($id -notmatch '^[A-Za-z0-9]+$') { throw "TWITCH_CLIENT_ID is not a bare client id" }
+          $file = "wheelhat/twitch/client_id.py"
+          $text = Get-Content $file -Raw
+          $updated = $text -replace 'BUNDLED_CLIENT_ID = ""', "BUNDLED_CLIENT_ID = `"$id`""
+          if ($updated -eq $text) { throw "could not find BUNDLED_CLIENT_ID to replace in $file" }
+          Set-Content $file $updated -Encoding utf8 -NoNewline
+          Write-Host "Baked in a client id of $($id.Length) characters."
       - name: Build
         run: pyinstaller build/wheelhat.spec --noconfirm --clean --distpath dist --workpath build/work
       - name: Refuse to ship a build with Qt baked in

@@ -161,3 +161,31 @@ canvas {
 .connection[hidden] {
   display: none;
 }
+
+/* -------------------------------------------------------------- result slot */
+
+/* Underneath: the banner keeps its row even when there is no winner to show.
+   Collapsing it would move the wheel up and down on every spin - the wheel is
+   already a fixed size, and this stops it jumping as well. */
+.stage[data-result='under'] .result {
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.stage[data-result='under'] .result[hidden] {
+  display: flex;
+  visibility: hidden;
+  animation: none;
+}
+
+/* On top: floated across the middle of the wheel, taking no layout space at
+   all, so the wheel can use the full height of the source. */
+.stage[data-result='over'] .result {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}

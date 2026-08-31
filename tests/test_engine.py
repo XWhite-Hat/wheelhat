@@ -186,3 +186,63 @@ async def test_a_wheel_saved_before_images_still_loads():
     assert wheel.appearance.text_radial == 0.94
     db.save_wheel(wheel)
     assert db.get_wheel("whl_legacy").slices[0].image.is_drawable() is False
+
+
+async def test_resync_tells_a_reconnecting_overlay_which_slice_won():
+    """A source that connects mid-spin has to be able to move the wheel.
+
+    The payload used to carry only the winner's label, so an overlay that
+    reloaded during a spin showed the result banner while the wheel stayed at
+    rest - the pointer sat on whatever slice happened to be at the top, which
+    reads as the wheel contradicting its own result.
+    """
+    from wheelhat.api.ws import resync_payload
+
+    made = db.save_wheel(
+        Wheel(
+            name="Resync",
+            slices=[Slice(id="sl_1", label="One"), Slice(id="sl_2", label="Two")],
+        )
+    )
+    engine = SpinEngine()
+    try:
+        await engine.spin(made.id, force_slice_id="sl_2")
+        active = engine.active_spin(made.id)
+        assert active is not None
+
+        payload = resync_payload(active)
+        assert payload["winner_id"] == "sl_2"
+        assert payload["winner"] == "Two"
+        # The id has to match a slice the overlay actually draws, or it cannot
+        # find the wedge to stop on.
+        drawn = [s["id"] for s in render_payload(db.get_wheel(made.id))["slices"]]
+        assert payload["winner_id"] in drawn
+    finally:
+        await engine.cancel(made.id)
+
+
+async def test_resync_reports_time_left_on_the_wheel_not_on_the_actions():
+    """A reconnecting source animates the rest of the spin, so it needs the
+    moment the wheel stops - not the moment the actions finish.
+
+    ends_at deliberately includes action_delay_ms. Animating to that would keep
+    the wheel turning after it should have come to rest on the winner.
+    """
+    from wheelhat.api.ws import resync_payload
+
+    made = db.save_wheel(Wheel(name="Timing", slices=[Slice(id="sl_1", label="One")]))
+    made.spin.duration_ms = 4000
+    made.spin.action_delay_ms = 3000
+    db.save_wheel(made)
+
+    engine = SpinEngine()
+    try:
+        await engine.spin(made.id, force_slice_id="sl_1")
+        payload = resync_payload(engine.active_spin(made.id))
+
+        # The wheel stops well before the actions do.
+        assert 3000 < payload["stops_in_ms"] <= 4000
+        assert 6000 < payload["ends_in_ms"] <= 7000
+        assert payload["stops_in_ms"] < payload["ends_in_ms"]
+    finally:
+        await engine.cancel(made.id)

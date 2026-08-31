@@ -18,7 +18,7 @@ import { imageLayerControl } from './image-layer.js';
 import { renderFields } from './fields.js';
 import { store, subscribe } from './store.js';
 import { TRIGGER_TYPES, triggerSpec } from './trigger-schemas.js';
-import { WheelRenderer } from './wheel-canvas.js';
+import { contrastColor, recommendedSource, WheelRenderer } from './wheel-canvas.js';
 
 const DEFAULT_PALETTE = [
   '#e5484d', '#f76b15', '#ffb224', '#46a758',
@@ -126,6 +126,8 @@ export async function renderWheelEditor(main, wheelId) {
           weight: s.weight,
           color: s.color,
           text_color: s.text_color,
+          border_color: s.border_color,
+          text_stroke_color: s.text_stroke_color,
           image: s.image,
         })),
       appearance: wheel.appearance,
@@ -337,6 +339,11 @@ export async function renderWheelEditor(main, wheelId) {
     return wrap;
   }
 
+  function paletteColor(index) {
+    const palette = wheel.appearance.palette?.length ? wheel.appearance.palette : DEFAULT_PALETTE;
+    return palette[index % palette.length];
+  }
+
   function sliceRow(slice, index, redraw) {
     const isOpen = expandedSlices.has(slice.id);
     const node = h('div.slice', { class: slice.enabled ? '' : 'disabled' });
@@ -345,7 +352,7 @@ export async function renderWheelEditor(main, wheelId) {
       'div.slice-head',
       h('input.slice-swatch', {
         type: 'color',
-        value: slice.color || DEFAULT_PALETTE[index % DEFAULT_PALETTE.length],
+        value: slice.color || paletteColor(index),
         title: 'Slice colour',
         oninput: (e) => {
           slice.color = e.target.value;
@@ -483,7 +490,34 @@ export async function renderWheelEditor(main, wheelId) {
           ),
           slice.cooldown_remaining
             ? h('span.pill.warn', `on cooldown for ${slice.cooldown_remaining} more spin(s)`)
-            : null
+            : null,
+          optionalColorField(
+            'Label colour',
+            slice.text_color,
+            contrastColor(slice.color || paletteColor(index)),
+            (value) => {
+              slice.text_color = value;
+              changed();
+            }
+          ),
+          optionalColorField('Inline colour', slice.border_color, wheel.appearance.slice_border_color, (value) => {
+            slice.border_color = value;
+            changed();
+          }),
+          optionalColorField(
+            'Label outline',
+            slice.text_stroke_color,
+            wheel.appearance.text_stroke_color || '#000000',
+            (value) => {
+              slice.text_stroke_color = value;
+              changed();
+            },
+            // Nothing is drawn until the wheel gives the outline a width, so say
+            // so rather than let someone pick a colour and see no change.
+            (wheel.appearance.text_stroke_width || 0) > 0
+              ? ''
+              : 'Set an outline width on the Look tab to show this.'
+          )
         ),
         (() => {
           if (!slice.image) slice.image = blankImage();
@@ -816,7 +850,7 @@ export async function renderWheelEditor(main, wheelId) {
             'Wedge border width',
             h('input', { type: 'number', min: 0, max: 12, step: 0.5, value: a.slice_border_width, oninput: bind('slice_border_width', Number) })
           ),
-          colorField('Wedge border', a.slice_border_color, bind('slice_border_color'))
+          colorField('Wedge inline', a.slice_border_color, bind('slice_border_color'))
         )
       ),
       h(
@@ -870,7 +904,74 @@ export async function renderWheelEditor(main, wheelId) {
           field(
             'Overlay size (px, 0 = fill the source)',
             h('input', { type: 'number', min: 0, max: 4000, step: 20, value: a.size, oninput: bind('size', Number) })
+          ),
+          field(
+            'Winner banner position',
+            h(
+              'select',
+              {
+                value: a.result_position || 'under',
+                onchange: (e) => {
+                  a.result_position = e.target.value;
+                  changed();
+                  drawTab();
+                },
+              },
+              h('option', { value: 'under' }, 'Underneath the wheel'),
+              h('option', { value: 'over' }, 'On top of the wheel')
+            ),
+            'Underneath reserves its room whether or not a winner is showing, so '
+              + 'the wheel never changes size. On top floats it across the wheel '
+              + 'and leaves the full height for the wheel itself.'
           )
+        ),
+        sourceSizeCard()
+      )
+    );
+  }
+
+  /** Browser source dimensions, with a recommendation that fits every element. */
+  function sourceSizeCard() {
+    const a = wheel.appearance;
+    const best = recommendedSource(a);
+    const matches = a.source_width === best.width && a.source_height === best.height;
+
+    return h(
+      'div',
+      { style: { marginTop: '18px' } },
+      h('h3', 'Browser source size'),
+      h(
+        'div.help',
+        { style: { marginBottom: '10px' } },
+        'The size to make the browser source in OBS. WheelHat always fits whatever '
+          + 'size the source really is - these numbers shape the preview above and '
+          + 'give you something to copy into OBS.'
+      ),
+      h(
+        'div.row',
+        field('Width', h('input', {
+          type: 'number', min: 160, max: 7680, step: 10, value: a.source_width,
+          oninput: (e) => { a.source_width = Number(e.target.value) || 0; changed(); },
+          onchange: () => drawTab(),
+        })),
+        field('Height', h('input', {
+          type: 'number', min: 160, max: 4320, step: 10, value: a.source_height,
+          oninput: (e) => { a.source_height = Number(e.target.value) || 0; changed(); },
+          onchange: () => drawTab(),
+        })),
+        h(
+          'button.btn.small',
+          {
+            disabled: matches,
+            title: 'Fit the wheel, the title, the banner and any frame with nothing cropped',
+            onclick: () => {
+              a.source_width = best.width;
+              a.source_height = best.height;
+              changed();
+              drawTab();
+            },
+          },
+          matches ? `Recommended (${best.width} x ${best.height})` : `Use ${best.width} x ${best.height}`
         )
       )
     );
@@ -1097,6 +1198,36 @@ export async function renderWheelEditor(main, wheelId) {
 
 function field(label, control, help) {
   return h('div.field', h('label', label), control, help ? h('div.help', help) : null);
+}
+
+/**
+ * A colour that is allowed to be unset.
+ *
+ * Slice text falls back to automatic contrast against the wedge, and the slice
+ * inline falls back to the wheel's own colour, so the control has to express
+ * "not set" as well as a colour - which a bare <input type="color"> cannot do.
+ */
+function optionalColorField(label, value, fallback, onChange, help) {
+  const swatch = h('input', {
+    type: 'color',
+    value: value || fallback || '#ffffff',
+    disabled: !value,
+    oninput: (e) => onChange(e.target.value),
+  });
+  const auto = h('input', {
+    type: 'checkbox',
+    checked: !value,
+    onchange: (e) => {
+      swatch.disabled = e.target.checked;
+      onChange(e.target.checked ? null : swatch.value);
+    },
+  });
+  return h(
+    'div.field',
+    h('label', label),
+    h('div.row', h('label.switch', auto, h('span', 'Auto')), swatch),
+    help ? h('div.help', help) : null
+  );
 }
 
 function colorField(label, value, onInput) {
