@@ -715,3 +715,31 @@ async def test_shadow_settings_round_trip_with_the_old_look_as_default(client):
 
     overlay = render_payload(db.get_wheel(made["id"]))["appearance"]
     assert overlay["shadow_blur"] == 12.5, "the overlay needs it to draw the shadow"
+
+
+async def test_manageable_rewards_are_a_separate_option_source(client, monkeypatch):
+    """The closing options are only offered for rewards WheelHat created, so the
+    editor needs a list of exactly those - not every reward on the channel."""
+    from wheelhat.actions.options import RESOLVERS
+    from wheelhat.twitch.service import twitch
+
+    assert "twitch.rewards.manageable" in RESOLVERS
+
+    asked: list[bool] = []
+
+    async def fake_list(manageable_only=False):
+        asked.append(manageable_only)
+        return [{"id": "r-1", "title": "Ours", "cost": 500}] if manageable_only else [
+            {"id": "r-1", "title": "Ours", "cost": 500},
+            {"id": "r-2", "title": "Made on Twitch", "cost": 100},
+        ]
+
+    monkeypatch.setattr(twitch, "list_rewards", fake_list)
+
+    every = await client.get("/api/options/twitch.rewards")
+    ours = await client.get("/api/options/twitch.rewards.manageable")
+
+    assert len(every.json()["options"]) == 2
+    assert len(ours.json()["options"]) == 1
+    assert ours.json()["options"][0]["value"] == "r-1"
+    assert asked == [False, True], "the manageable list must ask Twitch for only ours"

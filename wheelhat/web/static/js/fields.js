@@ -7,7 +7,7 @@
  * of asking them to hand-write a request.
  */
 
-import { api, clear, debounce, h } from './core.js';
+import { api, clear, debounce, h, modal, toast } from './core.js';
 
 const optionCache = new Map();
 
@@ -34,12 +34,29 @@ export function invalidateOptions(prefix = '') {
   }
 }
 
+/** Options already fetched for a source, if any. Read synchronously. */
+function cachedOptions(source) {
+  for (const [key, value] of optionCache) {
+    if (key === source || key.startsWith(`${source}?`)) return value?.options || [];
+  }
+  return null;
+}
+
 function visible(field, values) {
   const rule = field.when;
   if (!rule) return true;
   const current = values[rule.field];
   if (rule.equals) return rule.equals.some((v) => v === current);
   if (rule.not_equals) return !rule.not_equals.some((v) => v === current);
+  if (rule.in_source) {
+    // Shown only when the chosen value is one the source knows about - used to
+    // hide options that Twitch would refuse for a reward WheelHat did not
+    // create. Hidden until the list has been fetched: offering a control that
+    // silently does nothing is worse than showing it a moment late.
+    const options = cachedOptions(rule.in_source);
+    if (!current || options === null) return false;
+    return options.some((option) => String(option.value) === String(current));
+  }
   return true;
 }
 
@@ -72,6 +89,18 @@ export function renderFields({ fields, values, onChange = () => {}, extraParams 
     controls.set(field.key, control);
     control.wrapper.hidden = !visible(field, values);
     root.appendChild(control.wrapper);
+  }
+
+  // `in_source` rules need a list the browser does not have yet. Fetch each one
+  // once, then re-run the rules so the fields appear as soon as it lands.
+  const gated = [...new Set(fields.map((f) => f.when?.in_source).filter(Boolean))];
+  for (const source of gated) {
+    loadOptions(source, extraParams)
+      .then(() => change())
+      .catch(() => {
+        // Unreachable Twitch: leave the gated fields hidden rather than
+        // offering something that cannot work.
+      });
   }
 
   root.insertVariable = (token) => {
@@ -199,6 +228,60 @@ function buildField(field, values, change, extraParams, state) {
       return control;
     }
   }
+}
+
+/** Create a channel point reward without leaving the trigger. */
+function openCreateReward({ field, values, change, reload }) {
+  const title = h('input', { type: 'text', placeholder: 'Spin the wheel', maxlength: 45 });
+  const cost = h('input', { type: 'number', min: 1, step: 50, value: 500 });
+  const prompt = h('input', { type: 'text', placeholder: 'Shown to viewers when they redeem' });
+  const cooldown = h('input', { type: 'number', min: 0, step: 5, value: 0 });
+
+  modal({
+    title: 'New channel point reward',
+    confirmLabel: 'Create',
+    body: h(
+      'div',
+      h(
+        'p.card-hint',
+        'Created on your channel straight away. WheelHat owns it, which is what '
+          + 'lets it close the redemption once the wheel has spun.'
+      ),
+      h(
+        'div.grid.two',
+        h('div.field', h('label', 'Name'), title),
+        h('div.field', h('label', 'Cost in points'), cost),
+        h('div.field', h('label', 'Prompt (optional)'), prompt),
+        h('div.field', h('label', 'Cooldown in seconds (0 = none)'), cooldown)
+      )
+    ),
+    onConfirm: async () => {
+      if (!title.value.trim()) {
+        toast('Give the reward a name', 'bad');
+        return false;
+      }
+      let created;
+      try {
+        created = await api.post('/twitch/rewards', {
+          title: title.value.trim(),
+          cost: Number(cost.value) || 1,
+          prompt: prompt.value.trim(),
+          cooldown_seconds: Number(cooldown.value) || 0,
+        });
+      } catch (err) {
+        toast(err.message || 'Could not create the reward', 'bad', 6000);
+        return false;
+      }
+      // Select it, and drop both reward lists so the closing options can see
+      // that this one is manageable.
+      values[field.key] = created.reward?.id || '';
+      invalidateOptions('twitch.rewards');
+      change();
+      await reload();
+      toast('Reward created and selected', 'ok');
+      return true;
+    },
+  });
 }
 
 /**
@@ -333,11 +416,19 @@ function buildLiveSelect(field, values, change, extraParams, wrapper, control, s
     : null;
   const listenNote = listenButton ? h('div.help', { hidden: true }) : null;
 
+  // Creating the reward here rather than sending people to the Twitch page:
+  // a reward made by WheelHat is also the only kind whose redemptions it can
+  // close, so this is the path that makes the rest of the trigger work.
+  const createButton = field.capture === 'twitch.reward'
+    ? h('button.btn.small', { type: 'button', title: 'Create a new channel point reward' }, 'New')
+    : null;
+
   const live = h(
     'div.select-live',
     select,
     refreshButton,
     field.allow_custom === false ? null : manualButton,
+    createButton,
     listenButton
   );
   wrapper.append(labelFor(field), live, manualInput, error);
@@ -346,6 +437,13 @@ function buildLiveSelect(field, values, change, extraParams, wrapper, control, s
 
   if (listenButton) {
     attachRewardListen({ button: listenButton, note: listenNote, field, values, change, control });
+  }
+  if (createButton) {
+    // `load` is declared further down; referencing it inside the handler means
+    // it is resolved when the button is pressed, not when it is wired up.
+    createButton.addEventListener('click', () =>
+      openCreateReward({ field, values, change, reload: () => load({ force: true }) })
+    );
   }
 
   select.addEventListener('change', () => {

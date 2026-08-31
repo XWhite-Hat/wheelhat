@@ -375,9 +375,17 @@ The Twitch page can **create rewards on your channel**, so you never have to go
 looking for a reward id — create one, then pick it from the dropdown on a
 wheel's trigger.
 
-For a reward that already exists — including one made on Twitch itself — press
-**Listen** beside the reward dropdown on a channel point trigger and redeem it
-on your channel. WheelHat fills the reward in for you.
+A channel point trigger has both routes beside its reward dropdown:
+
+- **New** — create a reward there and then, without leaving the wheel. It is
+  selected as soon as it exists.
+- **Listen** — for a reward that already exists, including one made on Twitch
+  itself. Press it, redeem the reward on your channel, and WheelHat fills it in.
+
+The options for closing and refunding redemptions only appear once the selected
+reward is one WheelHat created. Twitch refuses to close a redemption for a
+reward made by anything else, so offering the switch for a reward created on
+Twitch would be offering something that quietly does nothing.
 
 That listen is deliberately a moment, not a habit. WheelHat sees every
 redemption on your channel anyway, but it only remembers one, only while you
@@ -488,7 +496,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 248 tests
+.venv\Scripts\python -m pytest          # 249 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

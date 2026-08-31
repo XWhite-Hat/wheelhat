@@ -61,6 +61,9 @@ First release.
   bits triggers are labelled as needing affiliate, the rewards card explains
   the situation and points at chat commands, and WheelHat stops asking Twitch
   for a channel points subscription it will always refuse.
+- Channel point rewards can be created from the trigger itself, and the
+  closing and refunding options only appear for a reward WheelHat created -
+  Twitch refuses to close anyone else's, so the switch used to do nothing.
 - A reward that already exists can be identified by redeeming it: press Listen
   on a channel point trigger and WheelHat fills in the next reward redeemed.
   The listen is armed by hand, takes one reward, keeps nothing about the viewer,

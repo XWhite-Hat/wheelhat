@@ -192,6 +192,24 @@ async def twitch_rewards(params: dict[str, str]) -> list[dict[str, Any]]:
     ]
 
 
+async def twitch_rewards_manageable(params: dict[str, str]) -> list[dict[str, Any]]:
+    """Only the rewards WheelHat created.
+
+    Twitch refuses to close a redemption for a reward made by anything else, so
+    this is what decides whether the closing options can honestly be offered.
+    """
+    from ..twitch.service import twitch
+
+    try:
+        rewards = await twitch.list_rewards(manageable_only=True)
+    except Exception as exc:  # noqa: BLE001
+        raise OptionError(str(exc)) from exc
+    return [
+        _opt(r.get("id", ""), f"{r.get('title', '')}  ·  {r.get('cost', 0)} pts")
+        for r in rewards
+    ]
+
+
 async def wheels(params: dict[str, str]) -> list[dict[str, Any]]:
     out = [_opt("", "The wheel that was spun")]
     out += [_opt(w.id, w.name) for w in db.list_wheels()]
@@ -222,6 +240,7 @@ RESOLVERS: dict[str, Callable[[dict[str, str]], Any]] = {
     "vts.models": vts_models,
     "vts.expressions": vts_expressions,
     "twitch.rewards": twitch_rewards,
+    "twitch.rewards.manageable": twitch_rewards_manageable,
     "wheels": wheels,
 }
 

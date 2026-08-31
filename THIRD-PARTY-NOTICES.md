@@ -14,9 +14,10 @@ MIT redistribution.
 | anyio | MIT |
 | certifi | MPL-2.0 |
 | click | BSD-3-Clause |
-| colorama | BSD License |
+| colorama | BSD-3-Clause |
 | customtkinter | MIT |
 | darkdetect | BSD-3-Clause |
+| exceptiongroup | MIT |
 | fastapi | MIT |
 | h11 | MIT |
 | httpcore | BSD-3-Clause |
@@ -34,6 +35,7 @@ MIT redistribution.
 | typing-extensions | PSF-2.0 |
 | typing-inspection | MIT |
 | uvicorn | BSD-3-Clause |
+| uvloop | MIT OR Apache-2.0 |
 | watchfiles | MIT |
 | websockets | BSD-3-Clause |
 <!-- dependencies:end -->

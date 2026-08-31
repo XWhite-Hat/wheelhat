@@ -5,8 +5,14 @@ were missing, one of them Apache-2.0, which carries retention obligations that
 MIT does not. Deriving it from installed metadata means it cannot drift again,
 and the accompanying test fails the build if it has.
 
-    python scripts/gen_notices.py            # rewrite the table
-    python scripts/gen_notices.py --check    # fail if it is out of date
+    python scripts/gen_notices.py            # merge this machine's set in
+    python scripts/gen_notices.py --check    # fail if anything is unattributed
+
+Dependencies differ by platform and Python version: uvloop everywhere except
+Windows, exceptiongroup below 3.11, colorama on Windows with some versions of
+click. No single machine resolves the whole set, so regenerating merges rather
+than replaces, and --check fails only on a missing package. Over-attribution is
+harmless; a gap is the licence violation.
 """
 
 from __future__ import annotations
@@ -33,13 +39,20 @@ LICENCE_OVERRIDES = {
     "customtkinter": "MIT",
 }
 
-#: Attributed whether or not this environment happens to have them.
-#: click requires colorama on Windows in some versions and not others, so
-#: whether it is bundled depends on which click resolves at build time.
-#: Naming a package that turns out not to ship costs nothing; leaving one
-#: out that does ship is the failure that matters.
-ALWAYS_ATTRIBUTE = {
+#: Dependencies that exist only on some platforms or Python versions, and so
+#: are invisible to a generator run on any single machine. Attribution has to
+#: cover every build published, not just the one that produced this file.
+#:
+#:   colorama        click, on Windows, in some versions
+#:   uvloop          uvicorn[standard], on everything except Windows
+#:   exceptiongroup  anyio, on Python older than 3.11
+#:
+#: Naming a package that turns out not to ship costs nothing. Leaving out one
+#: that does ship is the failure that matters.
+CONDITIONAL = {
     "colorama": "BSD-3-Clause",
+    "uvloop": "MIT OR Apache-2.0",
+    "exceptiongroup": "MIT",
 }
 
 
@@ -84,7 +97,7 @@ def bundled_distributions() -> list[str]:
     for extra in BUNDLED_EXTRAS:
         queue.extend(_requirements("wheelhat", extra))
 
-    seen.update(ALWAYS_ATTRIBUTE)
+    seen.update(CONDITIONAL)
 
     while queue:
         name, extras = queue.pop()
@@ -109,13 +122,15 @@ def bundled_distributions() -> list[str]:
 def licence_of(name: str) -> str:
     """The licence a distribution declares, preferring the SPDX expression."""
     key = name.lower().replace("_", "-")
-    override = LICENCE_OVERRIDES.get(key)
+    # Both maps are hand-verified, so they win over whatever a package
+    # happens to declare - colorama's classifier says only "BSD License".
+    override = LICENCE_OVERRIDES.get(key) or CONDITIONAL.get(key)
     if override:
         return override
     try:
         md = metadata(name)
     except PackageNotFoundError:
-        return ALWAYS_ATTRIBUTE.get(key, "unknown")
+        return CONDITIONAL.get(key, "unknown")
     expression = (md.get("License-Expression") or "").strip()
     if expression:
         return expression
@@ -128,10 +143,30 @@ def licence_of(name: str) -> str:
     return "see package"
 
 
-def build_table() -> str:
-    lines = ["| Package | Licence |", "| --- | --- |"]
+def listed_in_notices(text: str) -> dict[str, str]:
+    """Packages the file already names.
+
+    Read back so that regenerating on one machine cannot drop an entry added on
+    another - uvloop is only ever seen off Windows, exceptiongroup only below
+    Python 3.11.
+    """
+    body = text.partition(START)[2].partition(END)[0]
+    found: dict[str, str] = {}
+    for line in body.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 2 and cells[0] not in {"Package", "---"} and cells[1] != "---":
+            found[cells[0]] = cells[1]
+    return found
+
+
+def build_table(existing: dict[str, str]) -> str:
+    """The union of what this machine resolves and what the file already says."""
+    merged = dict(existing)
     for name in bundled_distributions():
-        lines.append(f"| {name} | {licence_of(name)} |")
+        merged[name] = licence_of(name)
+    lines = ["| Package | Licence |", "| --- | --- |"]
+    for name in sorted(merged):
+        lines.append(f"| {name} | {merged[name]} |")
     return "\n".join(lines)
 
 
@@ -140,19 +175,26 @@ def main(argv: list[str]) -> int:
     if START not in text or END not in text:
         raise SystemExit(f"Missing {START} / {END} markers in {NOTICES.name}.")
 
-    head, _, rest = text.partition(START)
-    _, _, tail = rest.partition(END)
-    updated = f"{head}{START}\n{build_table()}\n{END}{tail}"
+    existing = listed_in_notices(text)
 
     if "--check" in argv:
-        if updated != text:
-            print("THIRD-PARTY-NOTICES.md is out of date. Run: python scripts/gen_notices.py")
+        # Only a gap is a failure. Demanding an exact match would mean the file
+        # could never satisfy Linux and Windows at the same time, because the
+        # dependency set genuinely differs between them.
+        missing = sorted(name for name in bundled_distributions() if name not in existing)
+        if missing:
+            print("Not attributed in THIRD-PARTY-NOTICES.md: " + ", ".join(missing))
+            print("Run: python scripts/gen_notices.py")
             return 1
-        print("Notices are up to date.")
+        print(f"All {len(bundled_distributions())} bundled packages are attributed.")
         return 0
 
+    head, _, rest = text.partition(START)
+    _, _, tail = rest.partition(END)
+    updated = f"{head}{START}\n{build_table(existing)}\n{END}{tail}"
+
     NOTICES.write_text(updated, encoding="utf-8")
-    print(f"Wrote {len(bundled_distributions())} packages into {NOTICES.name}.")
+    print(f"Wrote {len(listed_in_notices(updated))} packages into {NOTICES.name}.")
     return 0
 
 

@@ -62,6 +62,7 @@ export const TRIGGER_TYPES = [
       },
       {
         key: 'auto_close',
+        when: { field: 'reward_id', in_source: 'twitch.rewards.manageable' },
         label: 'Close the redemption once the wheel has spun',
         type: 'bool',
         help:
@@ -71,6 +72,7 @@ export const TRIGGER_TYPES = [
       },
       {
         key: 'refund_on_failure',
+        when: { field: 'reward_id', in_source: 'twitch.rewards.manageable' },
         label: 'Refund the points if the wheel could not spin',
         type: 'bool',
         help: 'Cancels the redemption when a cooldown or a disabled wheel blocks the spin.',
