@@ -662,6 +662,72 @@ def test_every_bundled_package_is_named_in_the_notices():
     assert not missing, f"not attributed in THIRD-PARTY-NOTICES.md: {missing}"
 
 
+def test_the_wheel_canvas_cannot_size_itself_from_its_own_drawing_buffer():
+    """A canvas has intrinsic dimensions - its drawing buffer - so `height: 100%`
+    inside an auto-sized grid row is cyclic: the row takes its height from the
+    buffer, the percentage resolves against that row, and resize() measures the
+    result and writes it straight back into the buffer. It ratcheted up on every
+    pass until the canvas went square, hundreds of pixels past the bottom of its
+    own wrapper, drawing the wheel over the winner banner underneath it.
+
+    Two things break the cycle and both have to stay: layout() gives the canvas
+    a pixel size, and the wrapper declares its grid tracks rather than leaving
+    the row to be sized by its contents.
+    """
+    web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static"
+
+    overlay = (web / "js" / "overlay.js").read_text(encoding="utf-8")
+    body = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay, re.S)
+    assert body, "layout() has been renamed"
+    for prop in ("width", "height"):
+        assert re.search(rf"canvas\.style\.{prop}\s*=", body.group(1)), (
+            f"layout() no longer sets the canvas's {prop} in pixels, so the "
+            f"stylesheet's percentage decides it again"
+        )
+
+    css = (web / "css" / "overlay.css").read_text(encoding="utf-8")
+    rule = re.search(r"\.wheel-wrap \{(.*?)\n\}", css, re.S)
+    assert rule, "the .wheel-wrap rule has been renamed"
+    assert re.search(r"^\s*grid-template(-rows)?:", rule.group(1), re.M), (
+        "the wheel wrapper has no explicit grid rows, so the row is sized by "
+        "the canvas it contains"
+    )
+
+
+def test_the_winner_banner_is_opaque_when_it_sits_on_the_wheel():
+    """Underneath the wheel the banner has nothing behind it, so a translucent
+    background reads as a tint. Floated over the wheel the wedges show through
+    it - brightest through the winning wedge, which the renderer highlights -
+    and the banner looks like it is behind the wheel rather than on it."""
+    css = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "wheelhat" / "web" / "static" / "css" / "overlay.css"
+    ).read_text(encoding="utf-8")
+
+    block = re.search(r"\.stage\[data-result='over'\] \.result \{(.*?)\n\}", css, re.S)
+    assert block, "the rule that floats the banner over the wheel has been renamed"
+    background = re.search(r"^\s*background:\s*([^;]+);", block.group(1), re.M)
+    assert background, "no background declared for the banner over the wheel"
+    assert "rgba" not in background.group(1), (
+        f"the banner over the wheel is translucent: {background.group(1).strip()}"
+    )
+
+    # It also has to reach full opacity early. The reveal used to fade across
+    # the whole 420ms, and the wheel showed through it for most of that.
+    keyframes = re.search(r"@keyframes pop-centred \{(.*?)\n\}", css, re.S)
+    assert keyframes, "the pop-centred keyframes have been renamed"
+    stops = re.findall(r"(from|to|\d+)%?\s*\{([^}]*)\}", keyframes.group(1))
+    opaque_at = [
+        name
+        for name, body in stops
+        if re.search(r"opacity:\s*1\b", body) and name not in {"from", "to"}
+    ]
+    assert opaque_at, "no intermediate keyframe brings the banner to full opacity"
+    assert all(int(name) <= 40 for name in opaque_at), (
+        f"the banner stays translucent until {opaque_at}% of the reveal"
+    )
+
+
 def test_the_pages_fetch_nothing_from_third_party_hosts():
     """A webfont from a CDN discloses every viewer's IP to that CDN, and an OBS
     browser source would do it on every scene load."""

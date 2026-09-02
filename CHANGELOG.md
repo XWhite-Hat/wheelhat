@@ -75,6 +75,15 @@ First release.
   wheel, which the title and banner bands push off centre.
 - The version comes from the release tag at build time. The tree carries a
   placeholder, so a build from source is labelled as one.
+- The wheel no longer grows past the space reserved for it. The canvas took
+  its height from a percentage that resolved against a grid row sized by the
+  canvas itself, so each layout pass made it taller until it went square and
+  overflowed its wrapper - filling the source and covering the winner banner
+  below it. Most visible in a full-screen browser tab.
+- The winner banner is opaque when it sits on top of the wheel, and reaches
+  full opacity early in its reveal. It was 18% transparent, and faded in across
+  its whole animation, so the wedges showed through and it read as sitting
+  behind the wheel rather than on it.
 - A slice can spin another wheel, under Flow. A wheel refuses to spin itself,
   and a target that is already spinning is skipped rather than failing the
   chain.

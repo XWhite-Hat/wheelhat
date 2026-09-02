@@ -96,6 +96,15 @@ function layout() {
   lastSize = signature;
   wrap.style.width = `${boxWidth}px`;
   wrap.style.height = `${boxHeight}px`;
+  // Sized in pixels rather than left to `height: 100%` in the stylesheet. A
+  // canvas has intrinsic dimensions - its drawing buffer - and the wrapper's
+  // grid row is auto-sized, so the percentage was cyclic: the row took its
+  // height from the buffer, the percentage resolved against that row, and
+  // resize() measured the result and wrote it straight back into the buffer.
+  // Each pass made the canvas taller until it went square, hundreds of pixels
+  // past the bottom of its own wrapper and over the winner banner underneath.
+  canvas.style.width = `${boxWidth}px`;
+  canvas.style.height = `${boxHeight}px`;
   // Sized here too: the shadow scales with the wheel, so it has to be
   // recomputed whenever the source is resized.
   canvas.style.filter = shadowFilter(appearance, size);

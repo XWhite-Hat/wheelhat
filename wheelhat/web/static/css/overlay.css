@@ -52,6 +52,11 @@ body {
   position: relative;
   flex: 0 1 auto;
   display: grid;
+  /* Explicit tracks, not auto ones. An auto row is sized by its contents, and
+     the canvas's contents are its drawing buffer, so the row grew to whatever
+     the buffer happened to be instead of staying inside this box. 100% is
+     definite here because layout() sets this element's height in pixels. */
+  grid-template: 100% / 100%;
   place-items: center;
 }
 
@@ -197,12 +202,28 @@ canvas {
   transform: translate(-50%, -50%);
   animation: pop-centred 420ms cubic-bezier(0.18, 1.2, 0.4, 1);
   z-index: 3;
+  /* Opaque, and lifted off the wheel. Underneath the wheel there is nothing
+     behind the banner and 82% reads as a tint, but on top of the wheel the
+     wedges show through - brightest of all through the winning wedge, which
+     the renderer highlights - and the banner reads as sitting under the wheel
+     rather than on it. The shadow gives it somewhere to sit. */
+  background: rgb(12, 14, 18);
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.45);
 }
 
 @keyframes pop-centred {
   from {
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.86);
+  }
+  /* Fully opaque well before the scale settles. A half-faded banner over a
+     bright wheel looks like it is behind the wheel, so that phase is kept
+     short. Naming no transform here leaves the scale to interpolate straight
+     from the first keyframe to the last, so the bounce stays a single bounce. */
+  35% {
+    opacity: 1;
   }
   to {
     opacity: 1;
