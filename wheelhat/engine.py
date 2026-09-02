@@ -179,7 +179,12 @@ class SpinEngine:
             self._active[wheel_id] = active
             self._last_spin_at[wheel_id] = now
 
-        turns = _rng.uniform(wheel.spin.min_turns, max(wheel.spin.min_turns, wheel.spin.max_turns))
+        # A whole number. The overlay adds this many full revolutions on top of
+        # the angle that reaches the winner, so a fraction of a turn is a
+        # fraction of a wheel between the pointer and the slice that won.
+        turns = _rng.randint(
+            wheel.spin.min_turns, max(wheel.spin.min_turns, wheel.spin.max_turns)
+        )
         payload = {
             "type": "spin_start",
             "spin_id": spin_id,

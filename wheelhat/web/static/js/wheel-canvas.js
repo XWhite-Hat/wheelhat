@@ -878,7 +878,13 @@ export class WheelRenderer {
     const current = this.rotation;
     let delta = (desired - current) % TAU;
     if (delta < 0) delta += TAU;
-    const final = current + delta + TAU * Math.max(1, turns);
+    // Whole turns only. `delta` carries the wheel to the winner, and each extra
+    // turn has to be a full revolution or the landing angle moves with the
+    // fraction: 6.37 turns stops about three slices past the winner, 5.5 stops
+    // exactly half a wheel away. The animation looks the same either way, which
+    // is why it went unnoticed - the wheel simply stopped on the wrong slice.
+    const spins = Math.max(1, Math.round(Number(turns) || 0));
+    const final = current + delta + TAU * spins;
 
     this.spinning = true;
     this.highlightIndex = -1;

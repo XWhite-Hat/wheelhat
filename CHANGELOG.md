@@ -87,6 +87,10 @@ First release.
   given its value before its options existed, so it displayed the first one
   regardless: the winner position and background fit controls looked wrong,
   and could not be set back to their first value.
+- The wheel stops on the slice that won. It was told to spin a fractional
+  number of extra turns, and every fraction of a turn moved the landing angle
+  by that fraction of a wheel - so the pointer settled two or three slices past
+  the announced winner while the animation looked perfectly normal.
 - The editor preview animates to the winning slice by id rather than by its
   position, so it can no longer disagree with the browser source when the two
   slice lists differ - a slice on cooldown, one removed after a win, or an edit

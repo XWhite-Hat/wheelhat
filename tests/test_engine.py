@@ -280,3 +280,30 @@ async def test_a_slice_on_cooldown_is_not_a_candidate():
     )
     spinnable = [s.id for s in db.get_wheel(made.id).spinnable()]
     assert spinnable == ["sl_2"], "a slice counting down is not spun for"
+
+
+async def test_a_spin_asks_for_a_whole_number_of_turns(action_wheel):
+    """The overlay adds this many full revolutions on top of the angle that
+    reaches the winner, so a fraction of a turn is a fraction of a wheel
+    between the pointer and the slice that actually won. 6.37 turns stopped
+    about three slices past it; 5.5 stopped exactly half a wheel away.
+
+    The animation looks identical either way, which is why it was invisible
+    until someone checked the pointer against the announced winner.
+    """
+    stored = db.get_wheel(action_wheel.id)
+    stored.spin.min_turns = 5
+    stored.spin.max_turns = 8
+    db.save_wheel(stored)
+
+    engine = SpinEngine()
+    seen = set()
+    for _ in range(25):
+        result = await engine.spin(action_wheel.id, source="manual")
+        turns = result["turns"]
+        assert isinstance(turns, int), f"a fraction of a turn moves the landing angle: {turns!r}"
+        assert 5 <= turns <= 8
+        seen.add(turns)
+        await engine.cancel(action_wheel.id)
+
+    assert len(seen) > 1, "the turn count should still vary between spins"
