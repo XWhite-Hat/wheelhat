@@ -53,6 +53,13 @@ jobs:
         run: python scripts/bake_client_id.py
       - name: Build
         run: pyinstaller build/wheelhat.spec --noconfirm --clean --distpath dist --workpath build/work
+      - name: Put the licence texts beside the binary
+        # MIT and BSD-3-Clause bind binary redistribution, and a one-file exe is
+        # a distribution of every package inside it.
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE dist/
+          Copy-Item THIRD-PARTY-NOTICES.md dist/
       - name: Refuse to ship a build with Qt baked in
         # If PySide6 ever ends up bundled, the LGPL position changes and the
         # download is pointless. Fail the release rather than publish it.
@@ -82,13 +89,12 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: WheelHat-windows
-          # The licence texts travel with the binary. MIT and BSD-3-Clause both
-          # bind binary redistribution, and a one-file exe is a distribution of
-          # every package inside it.
-          path: |
-            dist/WheelHat.exe
-            LICENSE
-            THIRD-PARTY-NOTICES.md
+          # One path, so the artifact root is dist/ and the exe lands at the top
+          # of the artifact. Listing several paths makes upload-artifact infer
+          # the root from their least common ancestor - the repo root - which
+          # buries the exe under dist/ and silently breaks the publish glob
+          # below. That shipped a release with the licences and no binary.
+          path: dist/
 
   publish:
     name: Attach to the GitHub Release

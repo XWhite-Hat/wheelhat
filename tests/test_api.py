@@ -914,3 +914,39 @@ async def test_background_fit_rejects_anything_else(client):
     made["appearance"]["background_fit"] = "stretch"
     response = await client.put(f"/api/wheels/{made['id']}", json=made)
     assert response.status_code == 422
+
+
+def test_the_release_attaches_every_file_it_globs_for():
+    """A release shipped the licences and no binary.
+
+    upload-artifact roots an artifact at the least common ancestor of its
+    paths. Listing `dist/WheelHat.exe` alongside `LICENSE` moved that root from
+    `dist/` to the repo root, so the exe arrived one directory deeper than the
+    publish glob expected and was silently dropped. Nothing fails - the release
+    is simply built without the thing people came for, and only at tag time.
+    """
+    import fnmatch
+    import posixpath
+
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = yaml.safe_load((root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
+
+    upload = spec["jobs"]["windows-app"]["steps"][-1]["with"]
+    paths = [p.strip() for p in str(upload["path"]).splitlines() if p.strip()]
+    assert len(paths) == 1, (
+        "Several upload paths make the artifact root their common ancestor, "
+        "which moves everything deeper. Stage files into one directory instead."
+    )
+
+    artifact_root = paths[0].rstrip("/")
+    produced = ["dist/WheelHat.exe", "dist/LICENSE", "dist/THIRD-PARTY-NOTICES.md"]
+    available = [f"artifacts/{upload['name']}/{posixpath.relpath(f, artifact_root)}" for f in produced]
+    available += ["artifacts/dist/wheelhat-0.1.0-py3-none-any.whl"]
+
+    globs = spec["jobs"]["publish"]["steps"][-1]["with"]["files"].split()
+    unmatched = [g for g in globs if not any(fnmatch.fnmatch(a, g) for a in available)]
+    assert not unmatched, f"the release would attach nothing for: {unmatched}"
+
+    assert any("WheelHat.exe" in g for g in globs), "the release must attach the executable"
