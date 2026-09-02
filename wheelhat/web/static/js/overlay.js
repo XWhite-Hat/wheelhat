@@ -98,7 +98,7 @@ function layout() {
   wrap.style.height = `${boxHeight}px`;
   // Sized here too: the shadow scales with the wheel, so it has to be
   // recomputed whenever the source is resized.
-  wrap.style.filter = shadowFilter(appearance, size);
+  canvas.style.filter = shadowFilter(appearance, size);
   renderer.resize();
 }
 
@@ -118,7 +118,19 @@ function applyState(state) {
   const showTitle = appearance.show_title !== false && params.get('title') !== '0';
   titleEl.hidden = !showTitle;
   // Drives whether the banner sits in the column or floats over the wheel.
-  stage.dataset.result = resultIsUnder() ? 'under' : 'over';
+  const under = resultIsUnder();
+  stage.dataset.result = under ? 'under' : 'over';
+
+  // Floating over the wheel means over the *wheel*, which is not the middle of
+  // the browser source: the title and banner bands push the wheel off centre,
+  // and a background can move where the middle appears to be. The wheel canvas
+  // fills wheelWrap and is drawn at its centre, so parenting the banner there
+  // puts it on the wheel's axis whatever else is on screen.
+  const parent = under ? stage : wrap;
+  if (resultEl.parentElement !== parent) {
+    if (under) stage.insertBefore(resultEl, messageEl);
+    else wrap.appendChild(resultEl);
+  }
   titleEl.textContent = state.name || '';
 
   if (appearance.background && appearance.background !== 'transparent') {
@@ -130,7 +142,7 @@ function applyState(state) {
   layout();
   // layout() returns early when the size has not changed, so the filter is
   // applied here as well - editing the shadow does not resize anything.
-  wrap.style.filter = shadowFilter(appearance, Number(String(lastSize).split(':')[0]) || 0);
+  canvas.style.filter = shadowFilter(appearance, Number(String(lastSize).split(':')[0]) || 0);
   scheduleIdleHide();
 }
 

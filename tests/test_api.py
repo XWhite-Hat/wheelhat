@@ -950,3 +950,32 @@ def test_the_release_attaches_every_file_it_globs_for():
     assert not unmatched, f"the release would attach nothing for: {unmatched}"
 
     assert any("WheelHat.exe" in g for g in globs), "the release must attach the executable"
+
+
+def test_a_select_shows_the_value_it_was_given():
+    """h() used to set `value` with the other props, before the options existed.
+
+    Setting .value on an empty <select> does nothing, so the control fell back
+    to its first option: it displayed the wrong choice, saved correctly when
+    changed, and could not be changed back, because re-picking the value it was
+    already showing fires no change event.
+    """
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "wheelhat" / "web" / "static" / "js" / "core.js"
+    ).read_text(encoding="utf-8")
+
+    body = source[source.index("export function h("):]
+    body = body[: body.index("\nfunction append(")]
+    assert "deferredValue" in body, "value must be held back"
+    assert body.index("append(el, children)") < body.index("el.value = deferredValue"), (
+        "value has to be applied after the children, or a <select> cannot match it"
+    )
+
+
+async def test_the_removed_refresh_endpoint_is_gone(client):
+    """Saving already pushes to overlays and a reconnecting source is sent
+    state again, so the manual resend had nothing left to do."""
+    made = (await client.post("/api/wheels", json={})).json()
+    response = await client.post(f"/api/wheels/{made['id']}/refresh-overlays")
+    assert response.status_code == 404

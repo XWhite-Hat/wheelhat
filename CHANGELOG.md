@@ -68,6 +68,19 @@ First release.
   on a channel point trigger and WheelHat fills in the next reward redeemed.
   The listen is armed by hand, takes one reward, keeps nothing about the viewer,
   and expires on its own.
+- The winner banner, when set to sit on top, now grows from the centre of the
+  wheel. It was animating in from half its own size away and snapping into
+  place, because the shared animation ended on a transform that replaced the
+  one centring it - and it was centred on the browser source rather than on the
+  wheel, which the title and banner bands push off centre.
+- Dropdowns show the option that is actually selected. A <select> was being
+  given its value before its options existed, so it displayed the first one
+  regardless: the winner position and background fit controls looked wrong,
+  and could not be set back to their first value.
+- The editor preview animates to the winning slice by id rather than by its
+  position, so it can no longer disagree with the browser source when the two
+  slice lists differ - a slice on cooldown, one removed after a win, or an edit
+  not yet saved.
 - A background can be shown whole instead of cropped to fill, and the
   recommended source size grows to fit artwork that reaches past the wheel.
   The size follows the content until a width or height is set by hand.

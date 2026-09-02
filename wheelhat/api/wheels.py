@@ -259,13 +259,6 @@ async def render(wheel_id: str) -> dict[str, Any]:
     return render_payload(_get(wheel_id))
 
 
-@router.post("/{wheel_id}/refresh-overlays")
-async def refresh_overlays(wheel_id: str) -> dict[str, Any]:
-    wheel = _get(wheel_id)
-    await hub.broadcast_overlay(wheel_id, {"type": "wheel_state", **render_payload(wheel)})
-    return {"clients": hub.overlay_count(wheel_id)}
-
-
 # --------------------------------------------------------------------- history
 
 

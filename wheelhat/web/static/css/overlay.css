@@ -53,11 +53,13 @@ body {
   flex: 0 1 auto;
   display: grid;
   place-items: center;
-  /* Replaced by the wheel's own setting as soon as its state arrives. */
-  filter: drop-shadow(var(--wh-shadow));
 }
 
 canvas {
+  /* The shadow belongs to the wheel. On the wrapper it also fell across the
+     winner banner once that was parented there to sit on the wheel's axis.
+     Replaced by the wheel's own setting as soon as its state arrives. */
+  filter: drop-shadow(var(--wh-shadow));
   display: block;
   width: 100%;
   height: 100%;
@@ -183,10 +185,27 @@ canvas {
 
 /* On top: floated across the middle of the wheel, taking no layout space at
    all, so the wheel can use the full height of the source. */
+/* Centred on the wheel, and grows out of that centre.
+   The shared `pop` animation ends at `transform: none`, which replaces the
+   translate that does the centring - so the banner animated in from half its
+   own size away and snapped into place at the last frame. This keyframe keeps
+   the centring in every step. */
 .stage[data-result='over'] .result {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  animation: pop-centred 420ms cubic-bezier(0.18, 1.2, 0.4, 1);
   z-index: 3;
+}
+
+@keyframes pop-centred {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }

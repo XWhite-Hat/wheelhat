@@ -220,6 +220,10 @@ class SpinEngine:
             "winner_id": winner.id,
             "target_index": target_index,
             "duration_ms": duration,
+            # The editor preview animates from this response while the overlay
+            # animates from the broadcast. Without the same turn count they
+            # spin for different lengths of time side by side.
+            "turns": turns,
             "resolves_in_ms": duration + delay,
         }
 

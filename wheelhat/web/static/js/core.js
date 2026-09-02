@@ -11,9 +11,17 @@ export function h(spec, props = null, ...children) {
     props = null;
   }
 
+  // `value` is applied after the children, not with the other props. Setting
+  // it on a <select> that has no <option>s yet does nothing - the browser has
+  // nothing to match - and the select then falls back to its first option. The
+  // control shows the wrong thing, saves correctly when changed, and cannot be
+  // changed back, because re-picking what it already displays fires no event.
+  let deferredValue;
+
   for (const [key, value] of Object.entries(props || {})) {
     if (value === null || value === undefined || value === false) continue;
-    if (key === 'class') el.className = `${el.className} ${value}`.trim();
+    if (key === 'value') deferredValue = value;
+    else if (key === 'class') el.className = `${el.className} ${value}`.trim();
     else if (key === 'style' && typeof value === 'object') Object.assign(el.style, value);
     else if (key === 'dataset') Object.assign(el.dataset, value);
     else if (key.startsWith('on') && typeof value === 'function') {
@@ -24,6 +32,7 @@ export function h(spec, props = null, ...children) {
   }
 
   append(el, children);
+  if (deferredValue !== undefined) el.value = deferredValue;
   return el;
 }
 

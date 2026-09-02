@@ -246,3 +246,37 @@ async def test_resync_reports_time_left_on_the_wheel_not_on_the_actions():
         assert payload["stops_in_ms"] < payload["ends_in_ms"]
     finally:
         await engine.cancel(made.id)
+
+
+async def test_a_spin_tells_the_caller_which_slice_won_not_just_where(action_wheel):
+    """The editor preview animates from this response, the browser source from
+    the broadcast. Animating to an index made them disagree whenever the two
+    slice lists differed - a cooldown, an elimination, an unsaved edit - because
+    target_index counts into the server's spinnable list and the preview draws
+    its own. winner_id does not depend on either list."""
+    engine = SpinEngine()
+    try:
+        result = await engine.spin(action_wheel.id, source="manual")
+        assert result["winner_id"], "the preview needs an id it can match on"
+        assert result["winner_id"] == "sl_only"
+        # Same turn count as the broadcast, or the two animate for different
+        # lengths of time side by side.
+        assert "turns" in result
+        assert result["duration_ms"] >= 500
+    finally:
+        await engine.cancel(action_wheel.id)
+
+
+async def test_a_slice_on_cooldown_is_not_a_candidate():
+    """The preview filters its own list, so it has to use the same rule."""
+    made = db.save_wheel(
+        Wheel(
+            name="Cooling",
+            slices=[
+                Slice(id="sl_1", label="One", cooldown_remaining=2),
+                Slice(id="sl_2", label="Two"),
+            ],
+        )
+    )
+    spinnable = [s.id for s in db.get_wheel(made.id).spinnable()]
+    assert spinnable == ["sl_2"], "a slice counting down is not spun for"

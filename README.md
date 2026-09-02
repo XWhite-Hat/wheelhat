@@ -143,6 +143,12 @@ logo - loses its edges that way. Choose *Show all of it* on the Images tab, and
 the recommended source size grows to the artwork's own proportions so it fits
 exactly rather than floating in empty space.
 
+Shown whole, the artwork is inset so nothing sits flush against the edge of the
+source, and that gap holds at any scale: below 1 the scale shrinks it, at 1 and
+above it fills the space available. Fitting it to the box and *then* scaling is
+what used to push it back over the edge, and no source size can fix that -
+zooming in past the boundary is what *Fill the source* is for.
+
 That size follows the wheel and its artwork on its own. Type a width or height
 and it stops following and keeps yours; the button beside it hands control back.
 

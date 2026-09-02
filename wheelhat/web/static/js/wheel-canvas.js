@@ -23,6 +23,9 @@ export const EDGE_PADDING = 24;
 //: A recommendation nobody can use is not a recommendation. Scaled-up
 //: artwork could otherwise suggest a source larger than any monitor.
 export const MAX_SOURCE = 3840;
+//: Breathing room around artwork that drives the source size, so nothing
+//: ends up flush against the edge of the browser source.
+export const ART_MARGIN = 32;
 // Matches Appearance.size in models.py - the wheel size a new wheel starts at.
 export const DEFAULT_WHEEL_SIZE = 720;
 // Most labels are one or two lines; beyond three the text is too small to
@@ -187,13 +190,21 @@ export function recommendedSource(appearance = {}) {
     const naturalHeight = image?.naturalHeight || 0;
     if (naturalWidth > 0 && naturalHeight > 0) {
       const aspect = naturalWidth / naturalHeight;
-      const grow = Math.max(Number(background.scale) || 1, 1);
-      // Both targets come from the box as it was. Deriving the second from the
-      // already-grown first applies the scale twice and runs away.
+      // Deliberately not scaled by the layer's own scale. The artwork is fitted
+      // to whatever source it is given, so a bigger source shows it bigger, not
+      // more of it - multiplying here only inflated the recommendation without
+      // changing what a viewer sees.
+      //
+      // Both targets come from the box as it was: deriving the second from the
+      // already-grown first compounds and runs away.
       const wasWide = width;
       const wasTall = height;
-      width = Math.min(MAX_SOURCE, Math.max(wasWide, Math.ceil(wasTall * aspect * grow)));
-      height = Math.min(MAX_SOURCE, Math.max(wasTall, Math.ceil((wasWide * grow) / aspect)));
+      // Room past the artwork on every side. Sized exactly to the art it sits
+      // flush against the edge, where rounding alone shaves the last pixel and
+      // anything with a soft edge or a shadow looks clipped.
+      const buffer = ART_MARGIN * 2;
+      width = Math.min(MAX_SOURCE, Math.max(wasWide, Math.ceil(wasTall * aspect) + buffer));
+      height = Math.min(MAX_SOURCE, Math.max(wasTall, Math.ceil(wasWide / aspect) + buffer));
     }
   }
 
@@ -456,12 +467,33 @@ export class WheelRenderer {
     // cover fills the source and crops the rest, which is what a photograph
     // wants. Artwork with a shape - a character, a logo, a frame - loses its
     // edges that way, so it can ask to be shown whole instead.
+    const contain = this.appearance.background_fit === 'contain';
+
+    // Shown whole means shown whole. Fitted edge to edge the artwork touches
+    // the boundary on the binding axis, where rounding shaves the last pixel
+    // and a soft edge or a shadow reads as clipped. Inset it so there is room
+    // on every side. Proportional, so the gap holds at any source size.
+    const inset = contain
+      ? Math.max(4, (ART_MARGIN * Math.min(width, height)) / REFERENCE_SIZE)
+      : 0;
+
+    // _drawLayer fits the image to the box and *then* multiplies by the
+    // layer's scale, so any scale above 1 leaves the box however large the box
+    // is - contain simply re-fits to the bigger box and multiplies again. A
+    // larger browser source therefore cannot stop it cropping.
+    //
+    // Dividing the box by the scale first cancels that: the art ends up inside
+    // the inset at every scale. Above 1 that means "fill the space available",
+    // which is what showing all of something can mean at most; below 1 it still
+    // shrinks. Zooming in past the edge is what the cover mode is for.
+    const zoom = contain ? Math.max(Number(this.appearance.background_image?.scale) || 1, 1) : 1;
+
     this._drawLayer(ctx, this.appearance.background_image, {
       x: width / 2,
       y: height / 2,
-      boxWidth: width,
-      boxHeight: height,
-      mode: this.appearance.background_fit === 'contain' ? 'contain' : 'cover',
+      boxWidth: Math.max(1, (width - inset * 2) / zoom),
+      boxHeight: Math.max(1, (height - inset * 2) / zoom),
+      mode: contain ? 'contain' : 'cover',
       radius: Math.min(width, height) / 2,
     });
   }

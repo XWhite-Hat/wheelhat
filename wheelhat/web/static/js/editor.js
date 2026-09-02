@@ -128,7 +128,9 @@ export async function renderWheelEditor(main, wheelId) {
     canvas.style.filter = shadowFilter(wheel.appearance, canvas.getBoundingClientRect().height);
     renderer.setState({
       slices: wheel.slices
-        .filter((s) => s.enabled && s.weight > 0)
+        // Matches Slice.is_spinnable() on the server. A slice on cooldown is
+        // not spun for, so it must not be drawn as though it could be.
+        .filter((s) => s.enabled && s.weight > 0 && !(s.cooldown_remaining > 0))
         .map((s) => ({
           id: s.id,
           label: s.label,
@@ -186,9 +188,15 @@ export async function renderWheelEditor(main, wheelId) {
 
   function localSpin(result) {
     renderer.spin({
-      targetIndex: result.target_index,
+      // By id, not by index. target_index counts into the server's spinnable
+      // list, and the preview draws its own: a slice on cooldown, one removed
+      // after a win, or an edit not yet saved makes the two lists different
+      // lengths, and the same index then lands on a different slice. The
+      // browser source uses the server's list so it stays right, which is how
+      // the preview ends up disagreeing with it.
+      targetIndex: result.winner_id,
       durationMs: result.duration_ms,
-      turns: 6,
+      turns: result.turns || 6,
       easing: wheel.spin.easing,
       spinId: result.spin_id,
     });
@@ -1375,14 +1383,6 @@ export async function renderWheelEditor(main, wheelId) {
       'div.row',
       { style: { marginTop: '10px' } },
       h('a.btn.small', { href: overlayUrl, target: '_blank', rel: 'noreferrer' }, 'Open in a tab'),
-      h(
-        'button.btn.small.ghost',
-        { onclick: guard(async () => {
-          const result = await api.post(`/wheels/${wheelId}/refresh-overlays`);
-          toast(`Refreshed ${plural(result.clients, 'connected source')}`, 'ok');
-        }) },
-        'Push update to sources'
-      ),
       h('span.grow'),
       h('span.pill', { id: 'overlayCount' }, `${wheel.overlay_clients || 0} connected`)
     ),
