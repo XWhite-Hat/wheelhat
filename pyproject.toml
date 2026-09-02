@@ -1,6 +1,6 @@
 [project]
 name = "wheelhat"
-version = "0.1.0"
+version = "0.0.0+source"
 description = "Spinner wheels for Twitch streamers, with OBS browser sources, channel point triggers and graphical action wiring."
 readme = "README.md"
 requires-python = ">=3.10"

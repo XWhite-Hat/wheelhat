@@ -21,7 +21,7 @@ it in the desktop shell afterwards.
 
 ```bash
 .venv\Scripts\python -m ruff check .      # rules live in pyproject.toml
-.venv\Scripts\python -m pytest -q         # 274 tests, about 35 seconds
+.venv\Scripts\python -m pytest -q         # 278 tests, about 35 seconds
 ```
 
 CI runs the same two commands on Windows and Linux across Python 3.10 to 3.13,
@@ -129,6 +129,24 @@ explicit variable on the command line still takes precedence.
 The most useful entries are `WHEELHAT_TWITCH_CLIENT_ID`, so a source build does
 not ask for a Twitch application, and `WHEELHAT_DATA_DIR`, to work against your
 real wheels instead of the empty `data/` beside the project.
+
+## Versions
+
+The version in the tree is the placeholder `0.0.0+source`, so anything built
+from a clone says so rather than claiming to be the last release. The release
+workflow stamps the tag into both `wheelhat/__init__.py` and `pyproject.toml`
+before building - both, because setting one alone ships an executable reporting
+one version inside a wheel named after another.
+
+To reproduce a versioned build locally:
+
+```
+python scripts/set_version.py v1.2.3
+...build...
+python scripts/set_version.py --clear
+```
+
+A test fails if a real version is ever committed.
 
 ## Building an executable that behaves like a release
 

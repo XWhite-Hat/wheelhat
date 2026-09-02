@@ -1070,3 +1070,84 @@ async def test_templates_can_be_listed_renamed_and_deleted(client):
 async def test_an_unknown_template_is_refused_rather_than_ignored(client):
     response = await client.post("/api/wheels", json={"template_id": "tpl_nope"})
     assert response.status_code == 404
+
+
+# -------------------------------------------------------------------- version
+
+
+def _version_script():
+    import importlib.util
+
+    path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "set_version.py"
+    spec = importlib.util.spec_from_file_location("set_version", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_source_tree_carries_a_placeholder_version():
+    """A build from source should say so, not claim to be whichever release
+    happened to be tagged last. The real version is stamped in at build time."""
+    from wheelhat import __version__
+
+    script = _version_script()
+    assert __version__ == script.PLACEHOLDER, (
+        "a version was committed; it belongs in the tag, not the tree"
+    )
+
+    project = (pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    assert f'version = "{script.PLACEHOLDER}"' in project, (
+        "the wheel would be named differently from what the app reports"
+    )
+
+
+def test_a_tag_is_stamped_into_both_places(tmp_path, monkeypatch):
+    """Setting one and not the other ships a 1.2.0 executable inside a
+    wheelhat-0.1.0.whl."""
+    script = _version_script()
+    init = tmp_path / "__init__.py"
+    project = tmp_path / "pyproject.toml"
+    init.write_text('"""doc"""\n\n__version__ = "0.0.0+source"\n', encoding="utf-8")
+    project.write_text('[project]\nname = "wheelhat"\nversion = "0.0.0+source"\n', encoding="utf-8")
+    monkeypatch.setattr(script, "INIT", init)
+    monkeypatch.setattr(script, "PYPROJECT", project)
+
+    script.apply(script.normalise("v1.2.3"))
+    assert '__version__ = "1.2.3"' in init.read_text(encoding="utf-8")
+    assert 'version = "1.2.3"' in project.read_text(encoding="utf-8")
+
+    script.apply(script.PLACEHOLDER)
+    assert script.PLACEHOLDER in init.read_text(encoding="utf-8")
+
+
+def test_version_tags_are_read_but_rubbish_is_refused():
+    script = _version_script()
+    assert script.normalise("v1.2.3") == "1.2.3"
+    assert script.normalise("1.2.3") == "1.2.3"
+    assert script.normalise("v2.0") == "2.0"
+    assert script.normalise("v1.0.0rc1") == "1.0.0rc1"
+    for bad in ("main", "v1.2.x", "release", ""):
+        with pytest.raises(SystemExit):
+            script.normalise(bad)
+
+
+def test_a_branch_ref_does_not_fail_a_manual_build(monkeypatch, tmp_path):
+    """The release workflow can be run by hand from a branch for a dry run.
+    GITHUB_REF_NAME is then the branch, which is not an error."""
+    script = _version_script()
+    init = tmp_path / "__init__.py"
+    project = tmp_path / "pyproject.toml"
+    init.write_text('__version__ = "0.0.0+source"\n', encoding="utf-8")
+    project.write_text('version = "0.0.0+source"\n', encoding="utf-8")
+    monkeypatch.setattr(script, "INIT", init)
+    monkeypatch.setattr(script, "PYPROJECT", project)
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+
+    assert script.main([]) == 0
+    assert script.PLACEHOLDER in init.read_text(encoding="utf-8")
+
+    # But a version typed by hand has to be a version.
+    with pytest.raises(SystemExit):
+        script.main(["v1.2.x"])

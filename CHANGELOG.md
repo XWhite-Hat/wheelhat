@@ -73,6 +73,8 @@ First release.
   place, because the shared animation ended on a transform that replaced the
   one centring it - and it was centred on the browser source rather than on the
   wheel, which the title and banner bands push off centre.
+- The version comes from the release tag at build time. The tree carries a
+  placeholder, so a build from source is labelled as one.
 - A wheel's look can be saved and reused. New wheels can start from a saved
   look, and an existing wheel can be restyled with one; slices, their actions
   and triggers are never carried over.
