@@ -73,6 +73,14 @@ First release.
   place, because the shared animation ended on a transform that replaced the
   one centring it - and it was centred on the browser source rather than on the
   wheel, which the title and banner bands push off centre.
+- A wheel's look can be saved and reused. New wheels can start from a saved
+  look, and an existing wheel can be restyled with one; slices, their actions
+  and triggers are never carried over.
+- The reset button on a slider sits beside the value it resets rather than on
+  top of the slider.
+- Redrawing part of the page no longer throws the reader back to the top, and
+  no longer takes the focus and caret of whatever they were typing in. Both
+  happened on any status arriving over the socket, not only on a click.
 - Dropdowns show the option that is actually selected. A <select> was being
   given its value before its options existed, so it displayed the first one
   regardless: the winner position and background fit controls looked wrong,

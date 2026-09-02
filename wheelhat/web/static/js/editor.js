@@ -12,6 +12,7 @@ import {
   h,
   modal,
   plural,
+  preserveView,
   toast,
   uid,
 } from './core.js';
@@ -262,8 +263,23 @@ export async function renderWheelEditor(main, wheelId) {
     )
   );
 
-  function drawTab() {
-    clear(tabBody);
+  function drawTab({ keepScroll = true } = {}) {
+    // Changing a setting that reshapes the tab should not move the page. Moving
+    // to a different tab should, which is why the two navigation call sites
+    // below opt out.
+    const rebuild = () => {
+      clear(tabBody);
+      drawTabBody();
+    };
+    if (keepScroll) preserveView(rebuild);
+    else {
+      rebuild();
+      const scroller = document.querySelector('.main');
+      if (scroller) scroller.scrollTop = 0;
+    }
+  }
+
+  function drawTabBody() {
     if (activeTab === 'slices') tabBody.appendChild(slicesTab());
     else if (activeTab === 'triggers') tabBody.appendChild(triggersTab());
     else if (activeTab === 'appearance') tabBody.appendChild(appearanceTab());
@@ -1370,6 +1386,97 @@ export async function renderWheelEditor(main, wheelId) {
     return box;
   }
 
+  /**
+   * Save this wheel's look so other wheels can start from it.
+   *
+   * Appearance and spin only: slices, their actions and triggers are what make
+   * this wheel this wheel, and inheriting them means deleting them first.
+   */
+  const templateCard = h(
+    'details.card',
+    { style: { marginTop: '14px' } },
+    h('summary', 'Saved looks'),
+    h(
+      'p.card-hint',
+      'A look is the palette, images, shape and spin - no slices, actions or '
+        + 'triggers. New wheels can start from one.'
+    ),
+    h('div', { id: 'templateList' }, h('div.muted', 'Loading…')),
+    h(
+      'div.row',
+      { style: { marginTop: '12px' } },
+      h(
+        'button.btn.small.primary',
+        {
+          onclick: guard(async () => {
+            save.flush();
+            await api.post('/templates', { wheel_id: wheelId });
+            toast('Look saved', 'ok');
+            await drawTemplates();
+          }),
+        },
+        `Save this wheel${'’'}s look`
+      )
+    )
+  );
+
+  async function drawTemplates() {
+    const box = $('#templateList', templateCard);
+    if (!box) return;
+    let templates = [];
+    try {
+      templates = (await api.get('/templates')).templates;
+    } catch (err) {
+      clear(box).appendChild(h('div.test-result.bad', err.message));
+      return;
+    }
+    clear(box);
+    if (!templates.length) {
+      box.appendChild(h('div.muted', 'None saved yet.'));
+      return;
+    }
+    for (const template of templates) {
+      box.appendChild(
+        h(
+          'div.log-row',
+          h('span.what', template.name),
+          h('span.grow'),
+          h(
+            'button.btn.small.ghost',
+            {
+              title: 'Apply this look to the wheel you are editing',
+              onclick: guard(async () => {
+                if (!(await confirmDialog(`Apply "${template.name}" to this wheel?`, {
+                  confirmLabel: 'Apply',
+                  danger: false,
+                  detail: 'Its colours, images and spin settings replace this wheel’s. Slices and triggers are untouched.',
+                }))) return;
+                const full = await api.get(`/templates/${template.id}`);
+                Object.assign(wheel.appearance, full.appearance);
+                Object.assign(wheel.spin, full.spin);
+                changed();
+                drawTab();
+                toast('Look applied', 'ok');
+              }),
+            },
+            'Apply'
+          ),
+          h(
+            'button.btn.small.ghost',
+            {
+              onclick: guard(async () => {
+                if (!(await confirmDialog(`Delete the look "${template.name}"?`))) return;
+                await api.del(`/templates/${template.id}`);
+                await drawTemplates();
+              }),
+            },
+            'Delete'
+          )
+        )
+      );
+    }
+  }
+
   const overlayCard = h(
     'div.card',
     h('h2', 'Browser source'),
@@ -1412,12 +1519,13 @@ export async function renderWheelEditor(main, wheelId) {
     h(
       'div.editor',
       h('div', tabs, tabBody),
-      h('div.editor-side', previewBox, overlayCard, triggerCard)
+      h('div.editor-side', previewBox, overlayCard, templateCard, triggerCard)
     )
   );
 
   clear(main).appendChild(page);
   drawTab();
+  drawTemplates();
   // Size the canvas backing store now rather than on the next frame.
   // getBoundingClientRect forces layout, so this gives real dimensions before
   // the first paint - and unlike requestAnimationFrame or ResizeObserver it

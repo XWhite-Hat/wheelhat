@@ -86,9 +86,20 @@ async def list_wheels() -> dict[str, Any]:
 
 @router.post("", status_code=201)
 async def create_wheel(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = payload or {}
-    if "id" in data:
-        data.pop("id")
+    data = dict(payload or {})
+    data.pop("id", None)
+
+    # Starting from a saved look: the template supplies appearance and spin,
+    # anything sent explicitly still wins.
+    template_id = str(data.pop("template_id", "") or "")
+    template = db.get_template(template_id) if template_id else None
+    if template_id and template is None:
+        raise HTTPException(status_code=404, detail="No such template.")
+    if template is not None:
+        data.setdefault("appearance", template.appearance.model_dump())
+        data.setdefault("spin", template.spin.model_dump())
+        data.setdefault("name", template.name)
+
     wheel = Wheel(**data) if data else Wheel(name="New wheel")
     if not wheel.slices:
         wheel.slices = [

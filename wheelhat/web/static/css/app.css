@@ -1336,12 +1336,10 @@ input[type='number'].slice-weight:focus {
   font-variant-numeric: tabular-nums;
 }
 
-/* Sits inline after the value rather than floating over the label, where it
-   used to overlap the number it was meant to reset. */
+/* In the row with the label and the value, so it never covers the slider.
+   Hidden until the field is hovered or focused: it is a rarely wanted escape
+   hatch, not something to look at while dragging. */
 .reset-slider {
-  order: 3;
-  align-self: flex-start;
-  margin-top: -22px;
   margin-left: auto;
   padding: 1px 6px;
   font-size: 10px;

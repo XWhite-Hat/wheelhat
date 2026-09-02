@@ -13,7 +13,7 @@ import threading
 from typing import Any, Optional
 
 from . import config
-from .models import SpinRecord, Wheel, now
+from .models import SpinRecord, Template, Wheel, now
 
 _lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -28,6 +28,13 @@ CREATE TABLE IF NOT EXISTS wheels (
     updated_at  REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS templates (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    doc         TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -120,6 +127,46 @@ def save_wheel(wheel: Wheel) -> Wheel:
             )
         conn.commit()
     return wheel
+
+
+def list_templates() -> list[Template]:
+    with _lock:
+        rows = connect().execute(
+            "SELECT doc FROM templates ORDER BY name COLLATE NOCASE ASC"
+        ).fetchall()
+    return [Template.model_validate_json(r["doc"]) for r in rows]
+
+
+def get_template(template_id: str) -> Optional[Template]:
+    with _lock:
+        row = connect().execute(
+            "SELECT doc FROM templates WHERE id = ?", (template_id,)
+        ).fetchone()
+    return Template.model_validate_json(row["doc"]) if row else None
+
+
+def save_template(template: Template) -> Template:
+    template.updated_at = now()
+    doc = template.model_dump_json()
+    with _lock:
+        conn = connect()
+        conn.execute(
+            "INSERT INTO templates (id, name, doc, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET name = excluded.name, doc = excluded.doc,"
+            " updated_at = excluded.updated_at",
+            (template.id, template.name, doc, template.created_at, template.updated_at),
+        )
+        conn.commit()
+    return template
+
+
+def delete_template(template_id: str) -> bool:
+    with _lock:
+        conn = connect()
+        cur = conn.execute("DELETE FROM templates WHERE id = ?", (template_id,))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def delete_wheel(wheel_id: str) -> bool:

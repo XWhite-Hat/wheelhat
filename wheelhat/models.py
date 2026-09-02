@@ -228,6 +228,23 @@ class SpinSettings(BaseModel):
     volume: float = 0.7
 
 
+class Template(BaseModel):
+    """A wheel's look, saved to start other wheels from.
+
+    Deliberately not a whole wheel. Slices, triggers and actions are what make
+    a wheel a particular wheel; a template is the part that is worth reusing -
+    the palette, the images, the shape, the labels, how the spin behaves. Start
+    a wheel from one and there is nothing to delete before adding your own.
+    """
+
+    id: str = Field(default_factory=lambda: new_id("tpl_"))
+    name: str = "Untitled template"
+    appearance: Appearance = Field(default_factory=Appearance)
+    spin: SpinSettings = Field(default_factory=SpinSettings)
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
 class Wheel(BaseModel):
     id: str = Field(default_factory=lambda: new_id("whl_"))
     name: str = "Untitled wheel"

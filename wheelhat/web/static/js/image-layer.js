@@ -44,25 +44,24 @@ function slider(label, layer, key, { min, max, step, suffix = '', onChange }) {
     },
   });
   paint();
-  return h(
-    'div.field',
-    h('div.row', h('label.grow', label), value),
-    input,
-    h(
-      'button.btn.small.ghost.reset-slider',
-      {
-        type: 'button',
-        title: 'Reset',
-        onclick: () => {
-          layer[key] = DEFAULTS[key];
-          input.value = DEFAULTS[key];
-          paint();
-          onChange();
-        },
+  // Beside the value it resets, in the header row. It used to sit after the
+  // slider and be dragged back up over it with a negative margin, which put a
+  // button on top of the control it belongs to.
+  const reset = h(
+    'button.btn.small.ghost.reset-slider',
+    {
+      type: 'button',
+      title: `Reset to ${DEFAULTS[key]}${suffix}`,
+      onclick: () => {
+        layer[key] = DEFAULTS[key];
+        input.value = DEFAULTS[key];
+        paint();
+        onChange();
       },
-      'reset'
-    )
+    },
+    'reset'
   );
+  return h('div.field', h('div.row', h('label.grow', label), reset, value), input);
 }
 
 function toggle(label, layer, key, onChange, { invert = false } = {}) {

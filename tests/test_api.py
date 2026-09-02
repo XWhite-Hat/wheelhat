@@ -979,3 +979,94 @@ async def test_the_removed_refresh_endpoint_is_gone(client):
     made = (await client.post("/api/wheels", json={})).json()
     response = await client.post(f"/api/wheels/{made['id']}/refresh-overlays")
     assert response.status_code == 404
+
+
+def test_redraws_do_not_throw_the_reader_back_to_the_top():
+    """`.main` is the scroll container. Emptying it collapses its height, which
+    clamps scrollTop to zero - so changing a dropdown, or a status arriving over
+    the socket while someone reads, jumped them to the top of the page, and took
+    the focus and caret of whatever they were typing in with it.
+
+    Every redraw that is not navigation has to go through preserveView.
+    """
+    js = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static" / "js"
+    offenders = []
+    for name in ("views.js", "editor.js"):
+        text = (js / name).read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            # A subscription callback that redraws without preserving position.
+            if "reason)" in stripped and "draw()" in stripped and "preserveView" not in stripped:
+                offenders.append(f"{name}:{number} {stripped[:60]}")
+            if stripped == "return subscribe(() => draw());":
+                offenders.append(f"{name}:{number} {stripped}")
+    assert not offenders, f"these redraws lose the scroll position: {offenders}"
+
+
+# ------------------------------------------------------------------ templates
+
+
+async def test_a_template_saves_the_look_and_not_the_wheel(client):
+    """Slices, their actions and triggers are what make a wheel a particular
+    wheel. Inheriting them means deleting them before you can start."""
+    made = (await client.post("/api/wheels", json={})).json()
+    made["appearance"]["rim_color"] = "#ff00aa"
+    made["appearance"]["label_color"] = "#101010"
+    made["spin"]["duration_ms"] = 9000
+    await client.put(f"/api/wheels/{made['id']}", json=made)
+
+    saved = (await client.post("/api/templates", json={"wheel_id": made["id"]})).json()
+    assert saved["appearance"]["rim_color"] == "#ff00aa"
+    assert saved["spin"]["duration_ms"] == 9000
+    assert "slices" not in saved
+    assert "triggers" not in saved
+    assert saved["name"].endswith("look"), "named after the wheel it came from"
+
+
+async def test_a_wheel_started_from_a_template_wears_it(client):
+    made = (await client.post("/api/wheels", json={})).json()
+    made["appearance"]["rim_color"] = "#00ddff"
+    await client.put(f"/api/wheels/{made['id']}", json=made)
+    template = (await client.post("/api/templates", json={"wheel_id": made["id"], "name": "Neon"})).json()
+
+    fresh = (await client.post("/api/wheels", json={"template_id": template["id"]})).json()
+    assert fresh["appearance"]["rim_color"] == "#00ddff"
+    assert fresh["id"] != made["id"]
+    assert fresh["slices"], "a new wheel still gets slices to start from"
+    assert all(not s["actions"] for s in fresh["slices"]), "and none of them carry actions"
+    assert fresh["triggers"] == [], "nor any triggers"
+
+
+async def test_editing_a_wheel_does_not_rewrite_its_template(client):
+    """The template is a copy taken at the time, not a live link."""
+    made = (await client.post("/api/wheels", json={})).json()
+    made["appearance"]["rim_color"] = "#111111"
+    await client.put(f"/api/wheels/{made['id']}", json=made)
+    template = (await client.post("/api/templates", json={"wheel_id": made["id"]})).json()
+
+    made["appearance"]["rim_color"] = "#eeeeee"
+    await client.put(f"/api/wheels/{made['id']}", json=made)
+
+    again = (await client.get(f"/api/templates/{template['id']}")).json()
+    assert again["appearance"]["rim_color"] == "#111111"
+
+
+async def test_templates_can_be_listed_renamed_and_deleted(client):
+    created = (await client.post("/api/templates", json={"name": "Plain"})).json()
+    listed = (await client.get("/api/templates")).json()["templates"]
+    assert any(t["id"] == created["id"] and t["name"] == "Plain" for t in listed)
+    assert "palette" in listed[0], "the card shows a swatch"
+
+    renamed = (await client.put(f"/api/templates/{created['id']}", json={"name": "Neon"})).json()
+    assert renamed["name"] == "Neon"
+
+    blank = await client.put(f"/api/templates/{created['id']}", json={"name": "   "})
+    assert blank.status_code == 422
+
+    assert (await client.delete(f"/api/templates/{created['id']}")).status_code == 200
+    assert (await client.delete(f"/api/templates/{created['id']}")).status_code == 404
+
+
+async def test_an_unknown_template_is_refused_rather_than_ignored(client):
+    response = await client.post("/api/wheels", json={"template_id": "tpl_nope"})
+    assert response.status_code == 404

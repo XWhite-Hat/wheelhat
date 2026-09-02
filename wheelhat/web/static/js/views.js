@@ -10,6 +10,7 @@ import {
   h,
   modal,
   plural,
+  preserveView,
   toast,
 } from './core.js';
 import { invalidateOptions } from './fields.js';
@@ -54,7 +55,11 @@ export async function renderWheels(main) {
   await refreshWheels();
   draw();
   const unsubscribe = subscribe((_, reason) => {
-    if (['wheels', 'overlays', 'spin_start', 'spin_finished', 'status'].includes(reason)) draw();
+    // A spin starting or finishing redraws every card. With several wheels
+    // that is a long list to be thrown back to the top of.
+    if (['wheels', 'overlays', 'spin_start', 'spin_finished', 'status'].includes(reason)) {
+      preserveView(draw);
+    }
   });
   return unsubscribe;
 }
@@ -141,9 +146,62 @@ function wheelCard(wheel) {
 }
 
 async function createWheel() {
-  const wheel = await api.post('/wheels', {});
-  await refreshWheels();
-  location.hash = `#/wheel/${wheel.id}`;
+  // Straight to a blank wheel unless there is a saved look to start from, in
+  // which case ask which. Nobody with no templates should meet a dialog.
+  let templates = [];
+  try {
+    templates = (await api.get('/templates')).templates;
+  } catch {
+    // Not being able to list templates is no reason to block a new wheel.
+  }
+  if (!templates.length) {
+    const wheel = await api.post('/wheels', {});
+    await refreshWheels();
+    location.hash = `#/wheel/${wheel.id}`;
+    return;
+  }
+
+  let chosen = '';
+  const start = async () => {
+    const wheel = await api.post('/wheels', chosen ? { template_id: chosen } : {});
+    await refreshWheels();
+    location.hash = `#/wheel/${wheel.id}`;
+    return true;
+  };
+
+  const option = (id, name, detail) =>
+    h(
+      'button.type-option',
+      {
+        type: 'button',
+        onclick: async () => {
+          chosen = id;
+          dialog.close();
+          await guard(start)();
+        },
+      },
+      h('strong', name),
+      h('small', detail)
+    );
+
+  const dialog = modal({
+    title: 'New wheel',
+    hideConfirm: true,
+    body: h(
+      'div.type-options',
+      option('', 'Plain wheel', 'The default look.'),
+      ...templates.map((t) => option(t.id, t.name, swatchLine(t)))
+    ),
+  });
+}
+
+/** A short description of what a saved look contains. */
+function swatchLine(template) {
+  const parts = [];
+  if (template.has_background_image) parts.push('background');
+  if (template.has_frame_image) parts.push('overlay');
+  parts.push(plural((template.palette || []).length, 'colour'));
+  return parts.join(' · ');
 }
 
 function importWheel() {
@@ -275,7 +333,11 @@ export async function renderConnections(main) {
   runScan();
 
   return subscribe((_, reason) => {
-    if (reason === 'integrations' || reason === 'status' || reason === 'hello') draw();
+    // Status arrives over the socket unprompted, so this can fire while
+    // someone is part-way down the page.
+    if (reason === 'integrations' || reason === 'status' || reason === 'hello') {
+      preserveView(draw);
+    }
   });
 }
 
@@ -538,7 +600,7 @@ export async function renderTwitch(main) {
   await refreshStatus();
   draw();
   return subscribe((_, reason) => {
-    if (['twitch', 'status', 'hello'].includes(reason)) draw();
+    if (['twitch', 'status', 'hello'].includes(reason)) preserveView(draw);
   });
 }
 
@@ -993,7 +1055,8 @@ export async function renderActivity(main) {
 
   await refreshStatus();
   draw();
-  return subscribe(() => draw());
+  // Settings redraws on any store change, including ones the user did not cause.
+  return subscribe(() => preserveView(draw));
 }
 
 /* ================================================================= settings */

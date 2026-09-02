@@ -215,6 +215,85 @@ export function modal({ title, body, confirmLabel = 'Save', onConfirm, wide = fa
  * "1 wheel", "2 wheels". Three places used to bracket a trailing s and one did
  * it properly, which is three too many ways to say the same thing.
  */
+/** Where an element sits under `root`, as child indices. */
+function positionOf(root, node) {
+  const path = [];
+  let current = node;
+  while (current && current !== root) {
+    const parent = current.parentElement;
+    if (!parent) return null;
+    path.unshift([...parent.children].indexOf(current));
+    current = parent;
+  }
+  return current === root ? path : null;
+}
+
+function nodeAt(root, path) {
+  let current = root;
+  for (const index of path) {
+    current = current && current.children ? current.children[index] : null;
+    if (!current) return null;
+  }
+  return current;
+}
+
+/**
+ * Rebuild part of the page without throwing away where the user was.
+ *
+ * `.main` is the scroll container. Emptying and refilling it collapses its
+ * height, which clamps scrollTop to zero, so any redraw - changing a dropdown,
+ * or a status arriving over the socket while someone is reading - snapped them
+ * back to the top of whatever they were part-way through.
+ *
+ * It also destroys whatever had focus. On a page that redraws when the socket
+ * says something, that can happen mid-sentence: the field is rebuilt from
+ * stored state, so the caret and anything typed but not yet saved go with it.
+ *
+ * A redraw usually rebuilds the same shape with different values, so the
+ * focused element is found again by its position in the tree. If the shape did
+ * change, or something else now sits there, nothing is focused rather than the
+ * wrong thing.
+ */
+export function preserveView(rebuild) {
+  const scroller = document.querySelector('.main');
+  const top = scroller ? scroller.scrollTop : 0;
+
+  const active = document.activeElement;
+  const tracking = Boolean(scroller && active && active !== document.body && scroller.contains(active));
+  const path = tracking ? positionOf(scroller, active) : null;
+  const tag = tracking ? active.tagName : '';
+  const type = tracking ? active.getAttribute('type') : '';
+  let caret = null;
+  if (path) {
+    // Only text-ish inputs have a selection; asking a number or colour input
+    // for one throws.
+    try {
+      caret = [active.selectionStart, active.selectionEnd];
+    } catch {
+      caret = null;
+    }
+  }
+
+  rebuild();
+
+  if (scroller && top) scroller.scrollTop = top;
+  if (!path) return;
+
+  const restored = nodeAt(scroller, path);
+  if (!restored || restored.tagName !== tag || restored.getAttribute('type') !== type) return;
+  if (typeof restored.focus !== 'function') return;
+
+  // preventScroll, or focusing undoes the scroll position just restored.
+  restored.focus({ preventScroll: true });
+  if (caret && caret[0] !== null && typeof restored.setSelectionRange === 'function') {
+    try {
+      restored.setSelectionRange(caret[0], caret[1]);
+    } catch {
+      // Some input types refuse a selection. Focus alone is enough.
+    }
+  }
+}
+
 export function plural(count, one, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
 }

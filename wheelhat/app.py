@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, config, db, httpclient
 from .api import api_router
+from .api.templates import router as templates_router
 from .api.ws import ws_router
 from .engine import engine
 from .integrations.registry import registry
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(api_router)
+    app.include_router(templates_router, prefix="/api")
     app.include_router(ws_router)
 
     config.ensure_dirs()

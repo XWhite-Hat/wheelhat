@@ -168,6 +168,21 @@ label colour, its inline colour, and its label outline colour. Each has an
 black or white automatically for contrast against the wedge), turn it off to
 pick a colour for that one slice.
 
+### Saved looks
+
+Once a wheel looks the way you want, save its look from **Saved looks** in the
+editor sidebar. A look is the palette, the images, the shape, the label styling
+and the spin behaviour - and nothing else. Slices, their actions and triggers
+are what make a wheel a particular wheel, and inheriting those means deleting
+them before you can start.
+
+**New wheel** then offers your saved looks alongside the plain one. You can also
+apply a look to a wheel you have already made: its colours, images and spin
+settings are replaced, its slices and triggers left alone.
+
+A look is a copy taken when you save it, not a live link, so restyling the wheel
+it came from does not rewrite it.
+
 ### Sizing the browser source
 
 Each wheel records the browser source size it is designed for, on the **Look**
@@ -520,7 +535,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 263 tests
+.venv\Scripts\python -m pytest          # 274 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 
