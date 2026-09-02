@@ -153,6 +153,10 @@ class Appearance(BaseModel):
     #: but they drive the editor preview's shape and the sizes we recommend.
     source_width: int = 1280
     source_height: int = 720
+    #: While true the size follows the content, growing to fit a background
+    #: or frame that reaches past the wheel. Setting a size by hand turns it
+    #: off, and from then on the numbers are the user's.
+    source_auto: bool = True
 
     # -- wedge shape ---------------------------------------------------------
     #: Gap between wedges, in degrees. Turns the wheel into separated segments.
@@ -187,6 +191,10 @@ class Appearance(BaseModel):
     hub_image: ImageLayer = Field(default_factory=ImageLayer)
     #: Drawn over the wheel and does not spin - frames, glass, bezels, glow.
     frame_image: ImageLayer = Field(default_factory=ImageLayer)
+    #: How the background fills the source. "cover" crops whatever does not
+    #: fit, which is right for a photo and wrong for artwork with a shape.
+    #: "contain" shows all of it.
+    background_fit: Literal["cover", "contain"] = "cover"
     #: Fit the frame to the whole browser source rather than to the wheel.
     #: A frame sized to the wheel is confined to the square the wheel sits
     #: in, so a wide overlay meant to span a 16:9 source was cropped.

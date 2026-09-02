@@ -21,7 +21,7 @@ it in the desktop shell afterwards.
 
 ```bash
 .venv\Scripts\python -m ruff check .      # rules live in pyproject.toml
-.venv\Scripts\python -m pytest -q         # 251 tests, about 35 seconds
+.venv\Scripts\python -m pytest -q         # 263 tests, about 35 seconds
 ```
 
 CI runs the same two commands on Windows and Linux across Python 3.10 to 3.13,

@@ -68,6 +68,9 @@ First release.
   on a channel point trigger and WheelHat fills in the next reward redeemed.
   The listen is armed by hand, takes one reward, keeps nothing about the viewer,
   and expires on its own.
+- A background can be shown whole instead of cropped to fill, and the
+  recommended source size grows to fit artwork that reaches past the wheel.
+  The size follows the content until a width or height is set by hand.
 - An overlay image can be fitted to the whole browser source instead of to the
   wheel. The canvas now spans the source rather than the square the wheel sits
   in, so wide artwork is no longer cropped on import.

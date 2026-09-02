@@ -860,3 +860,57 @@ def test_the_seed_wheel_description_is_not_a_tutorial():
     assert len(description) < 90, f"too long for a card subtitle: {description!r}"
     for imperative in ("open one", "then enable", "point it at"):
         assert imperative not in description.lower(), "instructions belong in the UI, not in data"
+
+
+def test_no_stray_control_characters_in_tracked_files():
+    """Escape sequences written through tooling have been mangled three times:
+    a backspace in the changelog, and twice a CSS escape that became a literal
+    0x15 and rendered as the text "b8" where an arrow belonged."""
+    import subprocess
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    listing = subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=False
+    )
+    offenders = []
+    for name in listing.stdout.split():
+        path = root / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            stray = [hex(ord(c)) for c in line if ord(c) < 32 and c != "\t"]
+            if stray:
+                offenders.append(f"{name}:{number} {stray}")
+    assert not offenders, f"control characters in tracked files: {offenders}"
+
+
+async def test_background_fit_and_auto_source_round_trip(client):
+    """A background with a shape is cropped by "cover"; the source can follow
+    the artwork instead of the artwork being cut to the source."""
+    made = (await client.post("/api/wheels", json={})).json()
+    look = made["appearance"]
+    assert look["background_fit"] == "cover", "unchanged for existing wheels"
+    assert look["source_auto"] is True, "size follows the content until told otherwise"
+
+    look["background_fit"] = "contain"
+    look["source_auto"] = False
+    look["source_width"] = 1043
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+    assert saved["appearance"]["background_fit"] == "contain"
+    assert saved["appearance"]["source_auto"] is False
+    assert saved["appearance"]["source_width"] == 1043
+
+    from wheelhat.engine import render_payload
+
+    overlay = render_payload(db.get_wheel(made["id"]))["appearance"]
+    assert overlay["background_fit"] == "contain", "the overlay draws it, so it needs this"
+
+
+async def test_background_fit_rejects_anything_else(client):
+    """The renderer branches on this value."""
+    made = (await client.post("/api/wheels", json={})).json()
+    made["appearance"]["background_fit"] = "stretch"
+    response = await client.put(f"/api/wheels/{made['id']}", json=made)
+    assert response.status_code == 422

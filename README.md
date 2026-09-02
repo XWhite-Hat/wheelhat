@@ -137,6 +137,15 @@ thin wedges a label drops back to one smaller line instead of cramming. Turn
 wrapping off for strictly one line per wedge, in which case *Trim labels after N
 characters* applies instead.
 
+A **background** can either fill the source, cropping whatever does not fit, or
+be shown whole. Fill suits a photograph; artwork with a shape - a character, a
+logo - loses its edges that way. Choose *Show all of it* on the Images tab, and
+the recommended source size grows to the artwork's own proportions so it fits
+exactly rather than floating in empty space.
+
+That size follows the wheel and its artwork on its own. Type a width or height
+and it stops following and keeps yours; the button beside it hands control back.
+
 The **drop shadow** is configurable per wheel — softness, offset, colour and
 opacity, or off entirely. Sizes scale with the wheel, so one setting looks right
 on any browser source. It is a CSS `drop-shadow`, so a wheel with a centre hole
@@ -505,7 +514,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 251 tests
+.venv\Scripts\python -m pytest          # 263 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

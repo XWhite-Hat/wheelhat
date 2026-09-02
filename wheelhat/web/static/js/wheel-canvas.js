@@ -20,6 +20,9 @@ const REFERENCE_SIZE = 600;
 export const TITLE_BAND = 52;
 export const RESULT_BAND = 84;
 export const EDGE_PADDING = 24;
+//: A recommendation nobody can use is not a recommendation. Scaled-up
+//: artwork could otherwise suggest a source larger than any monitor.
+export const MAX_SOURCE = 3840;
 // Matches Appearance.size in models.py - the wheel size a new wheel starts at.
 export const DEFAULT_WHEEL_SIZE = 720;
 // Most labels are one or two lines; beyond three the text is too small to
@@ -46,6 +49,8 @@ const DEFAULT_APPEARANCE = {
   text_color: '#ffffff',
   label_color: '',
   frame_fills_source: false,
+  background_fit: 'cover',
+  source_auto: true,
   rim_color: '#111318',
   rim_width: 10,
   pointer_color: '#ffffff',
@@ -168,10 +173,31 @@ export function recommendedSource(appearance = {}) {
   const title = appearance.show_title === false ? 0 : TITLE_BAND;
   const under =
     appearance.show_result !== false && (appearance.result_position || 'under') !== 'over';
-  return {
-    width: box + EDGE_PADDING * 2,
-    height: box + title + (under ? RESULT_BAND : 0) + EDGE_PADDING * 2,
-  };
+  let width = box + EDGE_PADDING * 2;
+  let height = box + title + (under ? RESULT_BAND : 0) + EDGE_PADDING * 2;
+
+  // A background reaching past the wheel is the usual reason a source is the
+  // wrong shape: fitted to a square it is either cropped (cover) or floating in
+  // empty space (contain). Grow the short side to the artwork's own proportions
+  // so it fits whole. Only ever grow - the wheel keeps the size it had.
+  const background = appearance.background_image;
+  if (layerActive(background)) {
+    const image = getImage(background.url);
+    const naturalWidth = image?.naturalWidth || 0;
+    const naturalHeight = image?.naturalHeight || 0;
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      const aspect = naturalWidth / naturalHeight;
+      const grow = Math.max(Number(background.scale) || 1, 1);
+      // Both targets come from the box as it was. Deriving the second from the
+      // already-grown first applies the scale twice and runs away.
+      const wasWide = width;
+      const wasTall = height;
+      width = Math.min(MAX_SOURCE, Math.max(wasWide, Math.ceil(wasTall * aspect * grow)));
+      height = Math.min(MAX_SOURCE, Math.max(wasTall, Math.ceil((wasWide * grow) / aspect)));
+    }
+  }
+
+  return { width, height };
 }
 
 /** Greedy word wrap at the context's current font. */
@@ -427,12 +453,15 @@ export class WheelRenderer {
   }
 
   _drawBackground(ctx, width, height) {
+    // cover fills the source and crops the rest, which is what a photograph
+    // wants. Artwork with a shape - a character, a logo, a frame - loses its
+    // edges that way, so it can ask to be shown whole instead.
     this._drawLayer(ctx, this.appearance.background_image, {
       x: width / 2,
       y: height / 2,
       boxWidth: width,
       boxHeight: height,
-      mode: 'cover',
+      mode: this.appearance.background_fit === 'contain' ? 'contain' : 'cover',
       radius: Math.min(width, height) / 2,
     });
   }

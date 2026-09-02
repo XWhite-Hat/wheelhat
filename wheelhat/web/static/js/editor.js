@@ -16,6 +16,7 @@ import {
   uid,
 } from './core.js';
 import { imageLayerControl } from './image-layer.js';
+import { onImageSettled } from './image-cache.js';
 import { renderFields } from './fields.js';
 import { store, subscribe } from './store.js';
 import { TRIGGER_TYPES, triggerSpec } from './trigger-schemas.js';
@@ -1181,10 +1182,31 @@ export async function renderWheelEditor(main, wheelId) {
           )
         )
       ),
-      card(
-        'Background',
-        'Sits behind the wheel and fills the whole browser source.',
-        'background_image'
+      h(
+        'div',
+        card('Background', 'Sits behind the wheel.', 'background_image'),
+        h(
+          'div',
+          { style: { margin: '-6px 0 18px' } },
+          field(
+            'Fit',
+            h(
+              'select',
+              {
+                value: a.background_fit || 'cover',
+                onchange: (e) => {
+                  a.background_fit = e.target.value;
+                  changed();
+                },
+              },
+              h('option', { value: 'cover' }, 'Fill the source (crops the edges)'),
+              h('option', { value: 'contain' }, 'Show all of it')
+            ),
+            'Fill suits a photo. Artwork with a shape loses its edges that way; '
+              + 'show all of it, and set the source to the size recommended beside '
+              + 'the browser source URL so it fits exactly.'
+          )
+        )
       ),
       card('Centre / hub', 'Clipped to a circle in the middle of the wheel.', 'hub_image'),
       card('Pointer', 'Replaces the drawn triangle at the top.', 'pointer_image')
@@ -1279,7 +1301,18 @@ export async function renderWheelEditor(main, wheelId) {
     const render = () => {
       const a = wheel.appearance;
       const best = recommendedSource(a);
+      const auto = a.source_auto !== false;
+
+      // While automatic, the size follows the content: add a background that
+      // reaches past the wheel and the recommendation grows to fit it. Typing a
+      // size takes it off automatic, and from then on the numbers are theirs.
+      if (auto && (a.source_width !== best.width || a.source_height !== best.height)) {
+        a.source_width = best.width;
+        a.source_height = best.height;
+        changed();
+      }
       const matches = a.source_width === best.width && a.source_height === best.height;
+
       const number = (key, label) =>
         h(
           'div.field',
@@ -1288,35 +1321,44 @@ export async function renderWheelEditor(main, wheelId) {
             type: 'number', min: 160, max: 7680, step: 10, value: a[key],
             oninput: (e) => {
               a[key] = Number(e.target.value) || 0;
+              a.source_auto = false;
               changed();
             },
             onchange: render,
           })
         );
+
       clear(box);
       box.append(
         h('div.grid.two', number('source_width', 'Width'), number('source_height', 'Height')),
         h(
           'div.row',
           { style: { marginTop: '10px' } },
-          h(
-            'button.btn.small',
-            {
-              disabled: matches,
-              title: 'Fits the wheel, the title, the banner and any frame with nothing cropped',
-              onclick: () => {
-                a.source_width = best.width;
-                a.source_height = best.height;
-                changed();
-                render();
-              },
-            },
-            matches ? `Recommended (${best.width} x ${best.height})` : `Use ${best.width} x ${best.height}`
-          )
+          auto
+            ? h('span.help', 'Following the wheel and its artwork.')
+            : h(
+                'button.btn.small',
+                {
+                  disabled: matches,
+                  title: 'Fits the wheel, the title, the banner and any artwork with nothing cropped',
+                  onclick: () => {
+                    a.source_auto = true;
+                    changed();
+                    render();
+                  },
+                },
+                matches ? `Recommended (${best.width} x ${best.height})` : `Use ${best.width} x ${best.height}`
+              )
         )
       );
     };
     render();
+    // A background's proportions are unknown until it has loaded, so the first
+    // render cannot account for it. Redraw when one settles.
+    const stopWatching = onImageSettled(() => {
+      if (box.isConnected) render();
+      else stopWatching();
+    });
     return box;
   }
 

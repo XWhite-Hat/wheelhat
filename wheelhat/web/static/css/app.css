@@ -360,7 +360,7 @@ details.card > summary::-webkit-details-marker {
 }
 
 details.card > summary::before {
-  content: 'b8';
+  content: '▸';
   display: inline-block;
   width: 1em;
   color: var(--text-dim);
@@ -389,7 +389,7 @@ details.fold > summary::-webkit-details-marker {
 }
 
 details.fold > summary::before {
-  content: 'b8';
+  content: '▸';
   display: inline-block;
   width: 1em;
   transition: transform 120ms ease;
