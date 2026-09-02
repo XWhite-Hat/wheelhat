@@ -75,6 +75,11 @@ First release.
   wheel, which the title and banner bands push off centre.
 - The version comes from the release tag at build time. The tree carries a
   placeholder, so a build from source is labelled as one.
+- A slice can spin another wheel, under Flow. A wheel refuses to spin itself,
+  and a target that is already spinning is skipped rather than failing the
+  chain.
+- Hiding the wheel between spins has its own "keep it on screen for" setting
+  rather than borrowing the winner banner's duration.
 - A wheel's look can be saved and reused. New wheels can start from a saved
   look, and an existing wheel can be restyled with one; slices, their actions
   and triggers are never carried over.

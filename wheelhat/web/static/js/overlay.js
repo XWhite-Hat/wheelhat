@@ -152,9 +152,13 @@ function scheduleIdleHide() {
     stage.dataset.hidden = 'false';
     return;
   }
+  // Its own setting. It used to reuse the winner banner's duration, so a short
+  // banner also meant a wheel that disappeared before anyone had looked at it.
+  const seconds = Number(appearance.hide_after_seconds);
+  const wait = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 5000;
   idleTimer = setTimeout(() => {
     stage.dataset.hidden = 'true';
-  }, Math.max(500, Number(appearance.result_duration_ms || 5000)));
+  }, Math.max(500, wait));
 }
 
 function wake() {

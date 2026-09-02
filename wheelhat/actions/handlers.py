@@ -1048,6 +1048,74 @@ async def overlay_sound(config: dict[str, Any], ctx: ExecContext) -> str:
 
 
 @action_type(
+    "spin_wheel",
+    "Spin another wheel",
+    "Flow",
+    description="Spin a second wheel when this slice wins.",
+    icon="rotate",
+    fields=[
+        Field(
+            key="target",
+            label="Wheel to spin",
+            type="select",
+            default="",
+            source="wheels",
+            required=True,
+            help="Must be a different wheel.",
+        ),
+        Field(
+            key="skip_actions",
+            label="Spin it without running its actions",
+            type="bool",
+            default=False,
+        ),
+        Field(
+            key="ignore_cooldown",
+            label="Spin it even if it is on cooldown",
+            type="bool",
+            default=False,
+        ),
+    ],
+)
+async def spin_wheel(config: dict[str, Any], ctx: ExecContext) -> str:
+    """Chain a spin onto another wheel.
+
+    Deliberately refuses to spin the wheel it was fired from. A wheel whose
+    slice spins itself never stops: each spin picks a slice, that slice spins
+    the wheel again, and the actions queue grows for as long as the app is
+    open. Chains between different wheels are still the caller's business -
+    A spinning B spinning A is a loop we cannot see from here - but the
+    single-wheel case is both the easiest to create by accident and the only
+    one that is always wrong.
+    """
+    from ..engine import SpinRejected, engine
+
+    target = (config.get("target") or "").strip()
+    if not target:
+        raise ActionFailed("No wheel chosen")
+    if target == ctx.wheel_id:
+        raise ActionFailed("A wheel cannot spin itself")
+
+    wheel = db.get_wheel(target)
+    if wheel is None:
+        raise ActionFailed("That wheel no longer exists")
+
+    try:
+        result = await engine.spin(
+            target,
+            source="chained",
+            variables={"user": ctx.variables.get("user", "")},
+            skip_actions=bool(config.get("skip_actions")),
+            ignore_cooldown=bool(config.get("ignore_cooldown")),
+        )
+    except SpinRejected as exc:
+        # Already spinning, or on cooldown. Not a fault worth failing a chain
+        # over - the wheel is simply busy.
+        return f"{wheel.name} was not spun: {exc}"
+    return f"Spun {wheel.name} -> {result['winner']}"
+
+
+@action_type(
     "delay",
     "Wait",
     "Flow",

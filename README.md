@@ -168,6 +168,17 @@ label colour, its inline colour, and its label outline colour. Each has an
 black or white automatically for contrast against the wedge), turn it off to
 pick a colour for that one slice.
 
+### Chaining wheels
+
+A slice can **spin another wheel**. Add the *Spin another wheel* action under
+Flow, pick the target, and optionally have it spin without running its own
+actions or in spite of its cooldown.
+
+A wheel cannot spin itself: each spin would pick a slice, that slice would spin
+it again, and it would never stop. Chains between different wheels are yours to
+keep sane. If the target is already spinning it is reported and skipped rather
+than failing, so the rest of the chain still runs.
+
 ### Saved looks
 
 Once a wheel looks the way you want, save its look from **Saved looks** in the
@@ -535,7 +546,7 @@ is an export/import button for backups.
 
 ```bash
 .venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\python -m pytest          # 278 tests
+.venv\Scripts\python -m pytest          # 284 tests
 .venv\Scripts\wheelhat --reload         # auto-reload on edits
 ```
 

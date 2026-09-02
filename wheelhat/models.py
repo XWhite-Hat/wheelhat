@@ -212,6 +212,10 @@ class Appearance(BaseModel):
     # Hide the wheel entirely between spins - handy for a browser source that
     # should only appear when something is actually happening.
     hide_when_idle: bool = False
+    #: How long the wheel stays on screen after a spin before hiding. It used
+    #: to borrow the winner banner's duration, which meant the banner could not
+    #: be shortened without the wheel vanishing sooner too.
+    hide_after_seconds: float = 5.0
     idle_spin_speed: float = 0.0
 
 

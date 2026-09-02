@@ -2,6 +2,7 @@
 
 import pytest
 
+from wheelhat import db
 from wheelhat.actions.executor import ActionFailed, ExecContext, execute_chain, execute_single
 from wheelhat.actions.schema import ACTION_TYPES, schema_payload
 
@@ -154,3 +155,62 @@ def test_actions_that_need_nothing_stay_available():
     assert always, "at least one action must work with nothing connected"
     groups = {s["group"] for s in always}
     assert "Web" in groups, "sending a webhook needs no local app and must always be offered"
+
+
+# ------------------------------------------------------- spinning other wheels
+
+
+async def test_a_slice_can_spin_another_wheel():
+    from wheelhat.engine import engine
+    from wheelhat.models import Slice, Wheel
+
+    first = db.save_wheel(Wheel(name="First", slices=[Slice(id="a", label="Go")]))
+    second = db.save_wheel(Wheel(name="Second", slices=[Slice(id="b", label="Landed")]))
+
+    ctx = ExecContext(wheel_id=first.id, wheel_name=first.name, slice_id="a", winner="Go")
+    detail = await execute_single(
+        {"type": "spin_wheel", "config": {"target": second.id, "skip_actions": True}}, ctx
+    )
+    try:
+        assert "Second" in detail and "Landed" in detail
+        assert engine.is_spinning(second.id), "the second wheel is actually spinning"
+    finally:
+        await engine.cancel(second.id)
+
+
+async def test_a_wheel_cannot_spin_itself():
+    """Each spin picks a slice, that slice spins the wheel again, and it never
+    stops. The easiest loop to build by accident, and always wrong."""
+    from wheelhat.models import Slice, Wheel
+
+    wheel = db.save_wheel(Wheel(name="Recursive", slices=[Slice(id="a", label="Again")]))
+    ctx = ExecContext(wheel_id=wheel.id, wheel_name=wheel.name, slice_id="a", winner="Again")
+
+    with pytest.raises(ActionFailed, match="cannot spin itself"):
+        await execute_single({"type": "spin_wheel", "config": {"target": wheel.id}}, ctx)
+
+
+async def test_a_busy_target_is_reported_not_raised():
+    """A wheel already spinning is busy, not broken; failing here would stop
+    the rest of the chain from running."""
+    from wheelhat.engine import engine
+    from wheelhat.models import Slice, Wheel
+
+    first = db.save_wheel(Wheel(name="Caller", slices=[Slice(id="a", label="Go")]))
+    second = db.save_wheel(Wheel(name="Busy", slices=[Slice(id="b", label="One")]))
+    await engine.spin(second.id, skip_actions=True)
+    try:
+        ctx = ExecContext(wheel_id=first.id, wheel_name=first.name, slice_id="a", winner="Go")
+        detail = await execute_single({"type": "spin_wheel", "config": {"target": second.id}}, ctx)
+        assert "was not spun" in detail
+    finally:
+        await engine.cancel(second.id)
+
+
+async def test_a_missing_target_fails_clearly():
+    from wheelhat.models import Slice, Wheel
+
+    wheel = db.save_wheel(Wheel(name="Caller", slices=[Slice(id="a", label="Go")]))
+    ctx = ExecContext(wheel_id=wheel.id, wheel_name=wheel.name, slice_id="a", winner="Go")
+    with pytest.raises(ActionFailed, match="no longer exists"):
+        await execute_single({"type": "spin_wheel", "config": {"target": "wh_gone"}}, ctx)

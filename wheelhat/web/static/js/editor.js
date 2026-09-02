@@ -1060,7 +1060,21 @@ export async function renderWheelEditor(main, wheelId) {
           'div.grid.two',
           switchField('Show the wheel name', a.show_title, bind('show_title')),
           switchField('Show the winner banner', a.show_result, bind('show_result')),
-          switchField('Hide the wheel between spins', a.hide_when_idle, bind('hide_when_idle')),
+          switchField('Hide the wheel between spins', a.hide_when_idle, (e) => {
+            a.hide_when_idle = e.target.checked;
+            changed();
+            drawTab();
+          }),
+          a.hide_when_idle
+            ? field(
+                'Keep the wheel on screen for (seconds)',
+                h('input', {
+                  type: 'number', min: 0.5, max: 600, step: 0.5, value: a.hide_after_seconds,
+                  oninput: bind('hide_after_seconds', Number),
+                }),
+                'Counted from the end of the spin.'
+              )
+            : null,
           field('Winner banner duration (ms)', h('input', { type: 'number', min: 0, step: 500, value: a.result_duration_ms, oninput: bind('result_duration_ms', Number) })),
           field('Idle rotation speed', h('input', { type: 'number', min: 0, max: 10, step: 0.5, value: a.idle_spin_speed, oninput: bind('idle_spin_speed', Number) })),
           field(

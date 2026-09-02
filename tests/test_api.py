@@ -1151,3 +1151,23 @@ def test_a_branch_ref_does_not_fail_a_manual_build(monkeypatch, tmp_path):
     # But a version typed by hand has to be a version.
     with pytest.raises(SystemExit):
         script.main(["v1.2.x"])
+
+
+async def test_the_idle_hide_delay_is_its_own_setting(client):
+    """It used to borrow the winner banner's duration, so shortening the banner
+    also made the wheel vanish sooner."""
+    made = (await client.post("/api/wheels", json={})).json()
+    assert made["appearance"]["hide_after_seconds"] == 5.0
+
+    made["appearance"]["hide_when_idle"] = True
+    made["appearance"]["hide_after_seconds"] = 30
+    made["appearance"]["result_duration_ms"] = 1000
+    saved = (await client.put(f"/api/wheels/{made['id']}", json=made)).json()
+
+    assert saved["appearance"]["hide_after_seconds"] == 30
+    assert saved["appearance"]["result_duration_ms"] == 1000, "the two are independent"
+
+    from wheelhat.engine import render_payload
+
+    overlay = render_payload(db.get_wheel(made["id"]))["appearance"]
+    assert overlay["hide_after_seconds"] == 30, "the overlay runs the timer"

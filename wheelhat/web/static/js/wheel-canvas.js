@@ -64,6 +64,7 @@ const DEFAULT_APPEARANCE = {
   font_weight: 700,
   label_max_chars: 22,
   label_wrap: true,
+  hide_after_seconds: 5,
   shadow_enabled: true,
   shadow_color: '#000000',
   shadow_opacity: 0.45,
