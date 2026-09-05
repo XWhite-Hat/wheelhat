@@ -21,7 +21,15 @@ import { onImageSettled } from './image-cache.js';
 import { renderFields } from './fields.js';
 import { store, subscribe } from './store.js';
 import { TRIGGER_TYPES, triggerSpec } from './trigger-schemas.js';
-import { contrastColor, recommendedSource, shadowFilter, WheelRenderer } from './wheel-canvas.js';
+import {
+  contrastColor,
+  recommendedSource,
+  RESULT_BAND,
+  shadowFilter,
+  STAGE_GAP,
+  TITLE_BAND,
+  WheelRenderer,
+} from './wheel-canvas.js';
 
 const DEFAULT_PALETTE = [
   '#e5484d', '#f76b15', '#ffb224', '#46a758',
@@ -100,9 +108,18 @@ export async function renderWheelEditor(main, wheelId) {
 
   let dirty = false;
 
+  //: Set by sourceSizeBlock(), which is built further down.
+  let refreshSourceSize = () => {};
+
   const changed = ({ preview = true } = {}) => {
     dirty = true;
     savedFlag.textContent = 'Unsaved changes…';
+    // The recommended source depends on the whole look - the wheel's size, the
+    // bands, and the background's scale - so it is recomputed whenever any of
+    // them moves, not only when its own card happens to redraw. Showing all of
+    // a background fits it to the source, so while the size is automatic the
+    // scale does nothing except through this: without it the slider was inert.
+    refreshSourceSize();
     if (preview) updatePreview();
     save();
   };
@@ -126,6 +143,33 @@ export async function renderWheelEditor(main, wheelId) {
     const sourceW = Math.max(160, Number(wheel.appearance.source_width) || 1280);
     const sourceH = Math.max(160, Number(wheel.appearance.source_height) || 720);
     previewBox.style.aspectRatio = `${sourceW} / ${sourceH}`;
+    // And the wheel where the overlay will put it, at the size it will be.
+    //
+    // Both halves matter. Centred on the source, the preview lined a background
+    // up against a wheel that sits higher on the real source. And given the
+    // whole band to fill, the preview's wheel grew with the source - so
+    // enlarging the source to make room for artwork scaled the wheel up by the
+    // same amount, the two moved together, and the artwork stayed hidden behind
+    // it however far the scale was pushed.
+    const look = wheel.appearance;
+    const bandTop = look.show_title !== false ? TITLE_BAND + STAGE_GAP : 0;
+    const bandBottom =
+      look.show_result !== false && (look.result_position || 'under') !== 'over'
+        ? RESULT_BAND + STAGE_GAP
+        : 0;
+    // Mirrors layout() in overlay.js: the wheel is its set size, capped by the
+    // room left, and the column of title, wheel and banner is centred.
+    const band = Math.max(120, sourceH - bandTop - bandBottom);
+    const configured = Number(look.size) || 0;
+    const fits = Math.min(sourceW, band);
+    const diameter = Math.max(120, configured > 0 ? Math.min(configured, fits) : fits);
+    const column = bandTop + diameter + bandBottom;
+    renderer.setWheelBox({
+      x: (sourceW - diameter) / 2 / sourceW,
+      y: ((sourceH - column) / 2 + bandTop) / sourceH,
+      width: diameter / sourceW,
+      height: diameter / sourceH,
+    });
     canvas.style.filter = shadowFilter(wheel.appearance, canvas.getBoundingClientRect().height);
     renderer.setState({
       slices: wheel.slices
@@ -144,10 +188,99 @@ export async function renderWheelEditor(main, wheelId) {
         })),
       appearance: wheel.appearance,
     });
+    frameContent();
   }
 
-  const resizeObserver = new ResizeObserver(() => renderer.resize());
+  /**
+   * The drawn content's bounding box, as fractions of the canvas.
+   *
+   * Measured from the pixels rather than worked out from the settings, because
+   * most of the empty space belongs to the artwork itself: a PNG is usually
+   * padded around whatever is drawn on it, and this one's cat covers about
+   * two thirds of its height. Nothing in the appearance says so.
+   *
+   * Null when nothing is drawn yet, or when the pixels cannot be read.
+   */
+  function drawnBounds() {
+    const width = canvas.width;
+    const height = canvas.height;
+    if (!width || !height) return null;
+    let pixels;
+    try {
+      pixels = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+    } catch {
+      return null; // tainted or zero-sized; frame the whole source instead
+    }
+    // Every second pixel. A couple of pixels of slack at this size is invisible
+    // and it keeps a slider drag cheap.
+    const step = 2;
+    let minX = width, minY = height, maxX = -1, maxY = -1;
+    for (let y = 0; y < height; y += step) {
+      const row = y * width;
+      for (let x = 0; x < width; x += step) {
+        if (pixels[(row + x) * 4 + 3] > 8) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return null;
+    return {
+      x: minX / width,
+      y: minY / height,
+      width: (maxX + step - minX) / width,
+      height: (maxY + step - minY) / height,
+    };
+  }
+
+  //: Room to leave past the last drawn pixel, as a fraction of the box.
+  const PREVIEW_MARGIN = 0.05;
+  //: Past this the preview stops being a preview and becomes a magnifier.
+  const PREVIEW_MAX_ZOOM = 4;
+
+  /**
+   * Sit the drawn content in the middle of the preview with a margin.
+   *
+   * The preview is the shape of the source, and a source is sized to hold the
+   * artwork whole - so most of it can be the transparent padding around that
+   * artwork, leaving the wheel small in a lot of nothing. This frames what was
+   * actually drawn instead. It crops the source rather than resizing anything:
+   * the overlay is unaffected.
+   */
+  function frameContent() {
+    const box = previewBox.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const bounds = drawnBounds();
+    let zoom = 1;
+    let centreX = 0.5;
+    let centreY = 0.5;
+    if (bounds) {
+      const room = 1 - PREVIEW_MARGIN * 2;
+      zoom = Math.min(room / bounds.width, room / bounds.height);
+      zoom = Math.max(1, Math.min(zoom, PREVIEW_MAX_ZOOM));
+      centreX = bounds.x + bounds.width / 2;
+      centreY = bounds.y + bounds.height / 2;
+    }
+    const width = box.width * zoom;
+    const height = box.height * zoom;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.style.left = `${box.width / 2 - centreX * width}px`;
+    canvas.style.top = `${box.height / 2 - centreY * height}px`;
+    // The backing store follows the element, so zooming in costs resolution
+    // rather than sharpness.
+    renderer.resize();
+  }
+
+  const resizeObserver = new ResizeObserver(() => frameContent());
   resizeObserver.observe(previewBox);
+  // A background's proportions - and its padding - are unknown until it loads.
+  const stopFraming = onImageSettled(() => {
+    if (previewBox.isConnected) frameContent();
+    else stopFraming();
+  });
 
   /* ----------------------------------------------------------------- header */
 
@@ -1336,19 +1469,26 @@ export async function renderWheelEditor(main, wheelId) {
    */
   function sourceSizeBlock() {
     const box = h('div', { style: { marginTop: '14px' } });
+    // While automatic, the size follows the content: add a background that
+    // reaches past the wheel and the recommendation grows to fit it. Typing a
+    // size takes it off automatic, and from then on the numbers are theirs.
+    //
+    // Kept apart from drawing, and silent about it: changed() calls this, so
+    // announcing an edit from in here would call changed() straight back.
+    const applyRecommendation = () => {
+      const a = wheel.appearance;
+      if (a.source_auto === false) return false;
+      const best = recommendedSource(a);
+      if (a.source_width === best.width && a.source_height === best.height) return false;
+      a.source_width = best.width;
+      a.source_height = best.height;
+      return true;
+    };
+
     const render = () => {
       const a = wheel.appearance;
       const best = recommendedSource(a);
       const auto = a.source_auto !== false;
-
-      // While automatic, the size follows the content: add a background that
-      // reaches past the wheel and the recommendation grows to fit it. Typing a
-      // size takes it off automatic, and from then on the numbers are theirs.
-      if (auto && (a.source_width !== best.width || a.source_height !== best.height)) {
-        a.source_width = best.width;
-        a.source_height = best.height;
-        changed();
-      }
       const matches = a.source_width === best.width && a.source_height === best.height;
 
       const number = (key, label) =>
@@ -1390,12 +1530,26 @@ export async function renderWheelEditor(main, wheelId) {
         )
       );
     };
+    refreshSourceSize = () => {
+      applyRecommendation();
+      if (box.isConnected) render();
+    };
+
+    // On the way in the recommendation may already have moved - a wheel saved
+    // before the recommendation accounted for the background's scale, say.
+    if (applyRecommendation()) changed();
     render();
     // A background's proportions are unknown until it has loaded, so the first
     // render cannot account for it. Redraw when one settles.
     const stopWatching = onImageSettled(() => {
-      if (box.isConnected) render();
-      else stopWatching();
+      if (!box.isConnected) {
+        stopWatching();
+        return;
+      }
+      // The recommendation, not just the drawing: the artwork's proportions are
+      // most of what it is for, and they are only known now.
+      if (applyRecommendation()) changed();
+      render();
     });
     return box;
   }

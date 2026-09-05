@@ -5,14 +5,18 @@
  * Nothing here decides a winner; that keeps every open source in agreement.
  */
 
-import { RESULT_BAND, shadowFilter, TITLE_BAND, WheelRenderer } from './wheel-canvas.js';
-
-//: Matches the `gap` on .stage in overlay.css.
-const STAGE_GAP = 14;
+import {
+  RESULT_BAND,
+  shadowFilter,
+  STAGE_GAP,
+  TITLE_BAND,
+  WheelRenderer,
+} from './wheel-canvas.js';
 
 const wheelId = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
 const params = new URLSearchParams(location.search);
 
+const fitEl = document.getElementById('fit');
 const stage = document.getElementById('stage');
 const titleEl = document.getElementById('title');
 const wrap = document.getElementById('wheelWrap');
@@ -58,14 +62,37 @@ function resultIsUnder() {
 function layout() {
   const configured = Number(params.get('size') || appearance.size || 0);
   const root = document.documentElement;
-  const width = root.clientWidth || window.innerWidth;
-  const height = root.clientHeight || window.innerHeight;
-  if (width <= 0 || height <= 0) {
+  const viewWidth = root.clientWidth || window.innerWidth;
+  const viewHeight = root.clientHeight || window.innerHeight;
+  if (viewWidth <= 0 || viewHeight <= 0) {
     // The source has no size yet. Timers still fire when frame callbacks and
     // resize observers do not, so poll briefly rather than waiting forever.
     scheduleLayoutRetry();
     return;
   }
+
+  // Compose at the size the wheel was designed for, then scale the whole thing
+  // to fit whatever the browser source turned out to be.
+  //
+  // Laying out to the window instead meant the picture depended on the window:
+  // a background is fitted to the box it is given, so the same wheel in a
+  // 1005x904 source and in a maximised tab got two different crops - the wide
+  // one zoomed nearly twice as hard. The editor preview is the configured
+  // source's shape, so it agreed with one and not the other. Composed at a
+  // fixed size and scaled, every source shows the same view, and resizing one
+  // scales the picture instead of recropping it.
+  const sourceWidth = Math.max(0, Number(appearance.source_width) || 0);
+  const sourceHeight = Math.max(0, Number(appearance.source_height) || 0);
+  //: No configured size is not a reason to letterbox: fill the source instead,
+  //: which is what the overlay has always done.
+  const composed = sourceWidth > 0 && sourceHeight > 0;
+  const width = composed ? sourceWidth : viewWidth;
+  const height = composed ? sourceHeight : viewHeight;
+  // Free to go above 1. A larger browser source should show a larger wheel,
+  // the way it always has; what must not change is the framing. The canvas's
+  // backing store is measured after this is applied, so scaling up costs
+  // resolution rather than sharpness.
+  const fit = composed ? Math.min(viewWidth / sourceWidth, viewHeight / sourceHeight) : 1;
 
   // Reserve the title and banner from the wheel's *settings*, never from what
   // happens to be on screen. Measuring visibility meant the wheel shrank the
@@ -84,31 +111,60 @@ function layout() {
   const fits = Math.min(width, height - chrome);
   const size = Math.max(120, configured > 0 ? Math.min(configured, fits) : fits);
 
-  // The wheel is `size` across, but the canvas is given the whole area left
-  // after the title and banner. The wheel is drawn centred in it, and the extra
-  // room is what lets a background or a frame cover the whole browser source
-  // rather than being cropped to the square the wheel occupies.
-  const boxWidth = Math.max(size, width);
-  const boxHeight = Math.max(size, height - chrome);
-  const signature = `${size}:${boxWidth}:${boxHeight}`;
+  // The wheel's own square, and nothing more. This used to be the whole area
+  // left after the title and banner, so that a background could cover the
+  // source - but the wheel is drawn at the smaller side of it, which made the
+  // wheel grow with the source. `size` was effectively ignored, and enlarging
+  // the source to fit artwork scaled the wheel up by the same amount, so the
+  // artwork never got any bigger beside it. The canvas is the whole source now,
+  // so this only has to reserve the wheel.
+  const boxWidth = size;
+  const boxHeight = size;
+  const signature = `${size}:${boxWidth}:${boxHeight}:${fit}`;
   if (signature === lastSize) return;
   layoutAttempts = 0;
   lastSize = signature;
+  // The stage is the source, and the transform fits it to the window. Set as a
+  // variable rather than as `transform` so hiding between spins, which scales
+  // the stage down, can multiply the two instead of replacing this one.
+  stage.style.width = `${width}px`;
+  stage.style.height = `${height}px`;
+  fitEl.style.setProperty('--wh-fit', String(fit));
   wrap.style.width = `${boxWidth}px`;
   wrap.style.height = `${boxHeight}px`;
-  // Sized in pixels rather than left to `height: 100%` in the stylesheet. A
-  // canvas has intrinsic dimensions - its drawing buffer - and the wrapper's
-  // grid row is auto-sized, so the percentage was cyclic: the row took its
-  // height from the buffer, the percentage resolved against that row, and
-  // resize() measured the result and wrote it straight back into the buffer.
-  // Each pass made the canvas taller until it went square, hundreds of pixels
-  // past the bottom of its own wrapper and over the winner banner underneath.
-  canvas.style.width = `${boxWidth}px`;
-  canvas.style.height = `${boxHeight}px`;
+  // The canvas is the whole source, not just the band the wheel sits in, so a
+  // background or a frame reaches every edge of the browser source. It used to
+  // be the band, which meant the background was fitted to a box shorter than
+  // the source by the height of the title and the winner banner - a different
+  // crop from the one the editor preview showed, and shifted down besides.
+  //
+  // Sized in pixels rather than left to `height: 100%` in the stylesheet: a
+  // canvas has intrinsic dimensions - its drawing buffer - so a percentage
+  // against a content-sized box is cyclic, and resize() wrote the measurement
+  // straight back into the buffer, growing it on every pass.
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
   // Sized here too: the shadow scales with the wheel, so it has to be
   // recomputed whenever the source is resized.
   canvas.style.filter = shadowFilter(appearance, size);
   renderer.resize();
+
+  // Where the wheel goes on that canvas. Measured rather than worked out from
+  // the bands: the column is centred, so the offset depends on the title's
+  // real height. wheelWrap holds no canvas of its own, but it still takes up
+  // the wheel's room in the column, and its room is reserved from the wheel's
+  // settings rather than from what happens to be on screen - so this is stable
+  // across a spin instead of moving when a winner appears.
+  const stageRect = stage.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  if (stageRect.width > 0 && stageRect.height > 0) {
+    renderer.setWheelBox({
+      x: (wrapRect.left - stageRect.left) / stageRect.width,
+      y: (wrapRect.top - stageRect.top) / stageRect.height,
+      width: wrapRect.width / stageRect.width,
+      height: wrapRect.height / stageRect.height,
+    });
+  }
 }
 
 window.addEventListener('resize', layout);

@@ -662,37 +662,258 @@ def test_every_bundled_package_is_named_in_the_notices():
     assert not missing, f"not attributed in THIRD-PARTY-NOTICES.md: {missing}"
 
 
-def test_the_wheel_canvas_cannot_size_itself_from_its_own_drawing_buffer():
-    """A canvas has intrinsic dimensions - its drawing buffer - so `height: 100%`
-    inside an auto-sized grid row is cyclic: the row takes its height from the
-    buffer, the percentage resolves against that row, and resize() measures the
-    result and writes it straight back into the buffer. It ratcheted up on every
-    pass until the canvas went square, hundreds of pixels past the bottom of its
-    own wrapper, drawing the wheel over the winner banner underneath it.
+def test_no_canvas_takes_its_size_from_its_own_drawing_buffer():
+    """A canvas is a replaced element: its drawing buffer is an intrinsic size.
+    Leave its CSS size to a percentage of a container that is itself sized by
+    its contents and the two chase each other - and resize() writes the result
+    straight back into the buffer, so it ratchets.
 
-    Two things break the cycle and both have to stay: layout() gives the canvas
-    a pixel size, and the wrapper declares its grid tracks rather than leaving
-    the row to be sized by its contents.
+    It bit both canvases. In the overlay the canvas grew past its wrapper until
+    it went square, drawing the wheel over the winner banner below it. In the
+    editor the buffer set the preview box's height and overrode the aspect
+    ratio meant to give it the source's shape, so a landscape source was
+    previewed in a portrait box and the background was fitted to a shape the
+    browser source never uses.
     """
     web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static"
 
-    overlay = (web / "js" / "overlay.js").read_text(encoding="utf-8")
-    body = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay, re.S)
+    # The overlay: sized in pixels, and out of flow so it cannot size anything.
+    overlay_js = (web / "js" / "overlay.js").read_text(encoding="utf-8")
+    body = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay_js, re.S)
     assert body, "layout() has been renamed"
     for prop in ("width", "height"):
         assert re.search(rf"canvas\.style\.{prop}\s*=", body.group(1)), (
-            f"layout() no longer sets the canvas's {prop} in pixels, so the "
-            f"stylesheet's percentage decides it again"
+            f"layout() no longer sets the canvas's {prop} in pixels"
         )
 
-    css = (web / "css" / "overlay.css").read_text(encoding="utf-8")
-    rule = re.search(r"\.wheel-wrap \{(.*?)\n\}", css, re.S)
-    assert rule, "the .wheel-wrap rule has been renamed"
-    assert re.search(r"^\s*grid-template(-rows)?:", rule.group(1), re.M), (
-        "the wheel wrapper has no explicit grid rows, so the row is sized by "
-        "the canvas it contains"
+    overlay_css = (web / "css" / "overlay.css").read_text(encoding="utf-8")
+    rule = re.search(r"\ncanvas \{(.*?)\n\}", overlay_css, re.S)
+    assert rule, "the overlay's canvas rule has been renamed"
+    assert re.search(r"^\s*position:\s*absolute;", rule.group(1), re.M), (
+        "the overlay canvas is back in flow, where it can size its container"
     )
 
+    # The preview: out of flow, so its buffer cannot decide the box's shape.
+    app_css = (web / "css" / "app.css").read_text(encoding="utf-8")
+    preview = re.search(r"\.preview-box canvas \{(.*?)\n\}", app_css, re.S)
+    assert preview, "the .preview-box canvas rule has been renamed"
+    assert re.search(r"^\s*position:\s*absolute;", preview.group(1), re.M), (
+        "the preview canvas is back in flow, where its drawing buffer sets the "
+        "height of the box and overrides the source's shape"
+    )
+    box = re.search(r"\.preview-box \{(.*?)\n\}", app_css, re.S)
+    assert box and re.search(r"^\s*aspect-ratio:", box.group(1), re.M), (
+        "the preview box has no aspect-ratio, so it is no longer the shape of "
+        "the configured source"
+    )
+    editor_js = (web / "js" / "editor.js").read_text(encoding="utf-8")
+    assert "previewBox.style.aspectRatio" in editor_js, (
+        "the editor no longer gives the preview the source's shape"
+    )
+
+
+def test_the_overlay_canvas_covers_the_whole_source():
+    """The background and a frame are drawn to the canvas, and both are meant to
+    reach every edge of the browser source. The canvas used to be only the band
+    left between the title and the winner banner, so a background was fitted to
+    a box shorter than the source and cropped differently from the preview.
+    """
+    web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web"
+
+    # The canvas is a sibling of the bands, not nested inside the wheel's slot.
+    html = (web / "overlay.html").read_text(encoding="utf-8")
+    assert re.search(r'<canvas id="wheel"></canvas>\s*\n\s*<div class="wheel-wrap"', html), (
+        "the canvas is no longer a sibling of the wheel's slot, so it cannot "
+        "span the whole source"
+    )
+
+    # It is given the source's size, not the band's.
+    overlay_js = (web / "static" / "js" / "overlay.js").read_text(encoding="utf-8")
+    body = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay_js, re.S)
+    assert re.search(r"canvas\.style\.width = `\$\{width\}px`", body.group(1)), (
+        "the canvas is sized to the wheel's band again rather than the source"
+    )
+    # And the wheel is told which part of it to sit in, or it would be drawn in
+    # the middle of the source - behind the title and over the banner.
+    assert "setWheelBox" in overlay_js, "the overlay no longer places the wheel"
+
+
+def test_the_overlay_composes_at_the_configured_source_size():
+    """The overlay lays out at the size the wheel was designed for and scales
+    that to whatever the browser source turned out to be.
+
+    Laying out to the window meant the picture depended on the window: a
+    background is fitted to the box it is given, so the same wheel at 1005x904
+    and in a maximised tab got two different crops - the wide one zoomed nearly
+    twice as hard - and the editor preview, which is the configured source's
+    shape, agreed with one and not the other.
+    """
+    web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web"
+    overlay_js = (web / "static" / "js" / "overlay.js").read_text(encoding="utf-8")
+    body = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay_js, re.S)
+    assert body, "layout() has been renamed"
+    for field in ("source_width", "source_height"):
+        assert f"appearance.{field}" in body.group(1), (
+            f"layout() no longer reads {field}, so the composition is back to "
+            f"being whatever size the window is"
+        )
+    assert "--wh-fit" in body.group(1), "layout() no longer scales the composition"
+
+    # The fit is a layout, not an animation. On the stage it rode the 420ms
+    # transition that hides the wheel between spins, so every load zoomed.
+    css = (web / "static" / "css" / "overlay.css").read_text(encoding="utf-8")
+    fit_rule = re.search(r"\n\.fit \{(.*?)\n\}", css, re.S)
+    assert fit_rule, "the .fit wrapper's rule has been renamed"
+    assert "transform: scale(var(--wh-fit))" in fit_rule.group(1)
+    assert "transition" not in fit_rule.group(1), (
+        "the fit is transitioned, so resizing the source animates instead of "
+        "just being the right size"
+    )
+    assert '<div class="fit"' in (web / "overlay.html").read_text(encoding="utf-8"), (
+        "the fit wrapper is gone; on the stage itself it would be overwritten "
+        "by the transform that hides the wheel between spins"
+    )
+
+def test_a_background_shown_whole_grows_the_source_instead_of_the_wheel():
+    """Showing all of a background fits it to the source and then multiplies by
+    the layer's scale, and those cancel exactly - that is what stops it ever
+    cropping, but it leaves the source as the only thing deciding how large the
+    artwork is beside the wheel.
+
+    Two things had to agree for the scale slider to do anything. The
+    recommendation has to grow the source with it, and the wheel has to keep the
+    size it was given: the wheel used to be drawn at the smaller side of all the
+    room left over, so a larger source scaled the wheel up by the same amount
+    and the artwork never gained on it.
+    """
+    js = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static" / "js"
+
+    canvas = (js / "wheel-canvas.js").read_text(encoding="utf-8")
+    body = re.search(r"export function recommendedSource\(.*?\n\}", canvas, re.S)
+    assert body, "recommendedSource has been renamed"
+    assert re.search(r"background_fit === 'contain'", body.group(0)), (
+        "the recommendation no longer distinguishes showing all of a background "
+        "from filling the source, where growing it would change nothing"
+    )
+    assert re.search(r"const box = .*\* art\)", body.group(0)), (
+        "the recommended source no longer grows with the background's scale, so "
+        "the slider moves nothing when the background is shown whole"
+    )
+
+    overlay = (js / "overlay.js").read_text(encoding="utf-8")
+    layout = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay, re.S)
+    assert re.search(r"const boxWidth = size;", layout.group(1)), (
+        "the wheel's slot is bigger than the wheel again, so the wheel is drawn "
+        "at the room available rather than at its configured size"
+    )
+
+def test_the_recommended_source_follows_every_change_to_the_look():
+    """The recommendation depends on the wheel's size, the bands and the
+    background's scale, but it was only applied when its own card redrew - on
+    mount, on its own inputs, and when an image loaded. Nothing else redraws it,
+    so moving any other control left it stale.
+
+    That went unnoticed while the recommendation barely moved. Once the
+    background's scale drove it - which is the only way that slider does
+    anything when a background is shown whole - it meant the slider was inert.
+    """
+    editor = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "wheelhat" / "web" / "static" / "js" / "editor.js"
+    ).read_text(encoding="utf-8")
+
+    body = re.search(r"const changed = \(\{[^}]*\} = \{\}\) => \{(.*?)\n  \};", editor, re.S)
+    assert body, "changed() has been renamed"
+    assert "refreshSourceSize()" in body.group(1), (
+        "changed() no longer refreshes the recommended source, so every control "
+        "except the source card's own leaves it stale"
+    )
+
+    # The artwork's proportions are most of the recommendation and are unknown
+    # until it loads, so that path has to apply it too, not just redraw.
+    settled = re.findall(r"onImageSettled\(\(\) => \{(.*?)\n    \}\);", editor, re.S)
+    assert settled, "the image-settled handlers have been renamed"
+    assert any("applyRecommendation()" in handler for handler in settled), (
+        "a background finishing loading no longer updates the recommendation, "
+        "so the source keeps a size worked out without knowing its shape"
+    )
+
+    # applyRecommendation is called *by* changed(); announcing an edit from
+    # inside it would call changed() straight back.
+    apply_body = re.search(r"const applyRecommendation = \(\) => \{(.*?)\n    \};", editor, re.S)
+    assert apply_body, "applyRecommendation has been renamed"
+    assert "changed(" not in apply_body.group(1), (
+        "applyRecommendation calls changed(), which calls it back"
+    )
+
+def test_the_preview_draws_the_wheel_at_the_size_it_is_set_to():
+    """The wheel is drawn at the smaller side of the box it is given, so a box
+    of "everything between the bands" makes it grow with the source.
+
+    That is what made the background's scale look like it moved nothing: growing
+    the source to make room for artwork scaled the preview's wheel up by the
+    same amount, the two moved together, and the artwork stayed hidden behind it
+    however far the scale was pushed. Both the overlay and the preview have to
+    reserve the wheel's own square, or they disagree about what fits.
+    """
+    js = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static" / "js"
+
+    editor = (js / "editor.js").read_text(encoding="utf-8")
+    body = re.search(r"function updatePreview\(\) \{(.*?)\n  \}", editor, re.S)
+    assert body, "updatePreview has been renamed"
+    assert re.search(r"const diameter = ", body.group(1)), (
+        "the preview no longer works out the wheel's own size"
+    )
+    box = re.search(r"setWheelBox\(\{(.*?)\}\)", body.group(1), re.S)
+    assert box, "the preview no longer places the wheel"
+    assert "width: diameter" in box.group(1) and "height: diameter" in box.group(1), (
+        "the preview's wheel fills the band again, so it grows with the source "
+        "and the background can never gain on it"
+    )
+
+    # The overlay reserves the same square. If these drift the preview lies.
+    overlay = (js / "overlay.js").read_text(encoding="utf-8")
+    layout = re.search(r"\nfunction layout\(\) \{(.*?)\n\}", overlay, re.S)
+    assert "const boxWidth = size;" in layout.group(1)
+    assert "const boxHeight = size;" in layout.group(1)
+
+def test_the_preview_is_framed_to_what_was_actually_drawn():
+    """A source is sized to hold the artwork whole, and artwork is usually
+    padded: this wheel's cat covers about two thirds of its PNG's height. Fitted
+    to the source, that padding became most of the preview, leaving the wheel
+    small in a lot of nothing.
+
+    Nothing in the appearance describes that padding, so the bounds are measured
+    from the pixels. It crops the preview only - the overlay still lays out the
+    whole source, and the box keeps the source's shape.
+    """
+    web = pathlib.Path(__file__).resolve().parent.parent / "wheelhat" / "web" / "static"
+    editor = (web / "js" / "editor.js").read_text(encoding="utf-8")
+
+    bounds = re.search(r"function drawnBounds\(\) \{(.*?)\n  \}", editor, re.S)
+    assert bounds, "drawnBounds has been renamed"
+    assert "getImageData" in bounds.group(1), (
+        "the drawn bounds are no longer measured from the pixels, and nothing "
+        "in the appearance describes an image's own padding"
+    )
+    assert "catch" in bounds.group(1), "reading the pixels can throw; it has to be guarded"
+
+    frame = re.search(r"function frameContent\(\) \{(.*?)\n  \}", editor, re.S)
+    assert frame, "frameContent has been renamed"
+    assert "Math.max(1, Math.min(zoom, PREVIEW_MAX_ZOOM))" in frame.group(1), (
+        "the preview zoom is unclamped: below 1 it would shrink the preview "
+        "inside its own box, and unbounded it becomes a magnifier"
+    )
+    assert "renderer.resize()" in frame.group(1), (
+        "the backing store no longer follows the element, so zooming in blurs"
+    )
+
+    # Cropping needs a clip, and the box still has to be the source's shape.
+    app_css = (web / "css" / "app.css").read_text(encoding="utf-8")
+    box = re.search(r"\.preview-box \{(.*?)\n\}", app_css, re.S)
+    assert re.search(r"^\s*overflow:\s*hidden;", box.group(1), re.M), (
+        "the preview box no longer clips, so a zoomed canvas spills out of it"
+    )
 
 def test_the_winner_banner_is_opaque_when_it_sits_on_the_wheel():
     """Underneath the wheel the banner has nothing behind it, so a translucent

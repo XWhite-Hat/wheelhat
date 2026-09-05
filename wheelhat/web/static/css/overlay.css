@@ -22,8 +22,24 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Centres the stage, which is the size of the configured source and may be
+   scaled down to fit. The bars either side are transparent, so OBS composites
+   the scene through them. */
+body {
+  display: grid;
+  place-items: center;
+}
+
+/* The composed source, scaled to whatever the browser source turned out to be.
+   Not transitioned: this is a layout, not an animation. */
+.fit {
+  --wh-fit: 1;
+  transform: scale(var(--wh-fit));
+}
+
 .stage {
   position: relative;
+  /* Replaced with the configured source's size by layout(). */
   width: 100%;
   height: 100%;
   display: flex;
@@ -36,6 +52,8 @@ body {
 
 .stage[data-hidden='true'] {
   opacity: 0;
+  /* Compounds with the fit on the wrapper rather than replacing it, so hiding
+     the wheel does not also resize it to the window. */
   transform: scale(0.94);
   pointer-events: none;
 }
@@ -48,26 +66,41 @@ body {
   text-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
 }
 
+/* Reserves the band the wheel is drawn in. It holds no canvas of its own -
+   the wheel is painted on the source-sized canvas behind it - but it still
+   takes up the wheel's room in the column, and the winner banner is parented
+   here when it sits on the wheel's axis. */
 .wheel-wrap {
   position: relative;
   flex: 0 1 auto;
-  display: grid;
-  /* Explicit tracks, not auto ones. An auto row is sized by its contents, and
-     the canvas's contents are its drawing buffer, so the row grew to whatever
-     the buffer happened to be instead of staying inside this box. 100% is
-     definite here because layout() sets this element's height in pixels. */
-  grid-template: 100% / 100%;
-  place-items: center;
+  z-index: 1;
 }
 
 canvas {
-  /* The shadow belongs to the wheel. On the wrapper it also fell across the
+  /* The whole browser source, behind the title and the banner, so a background
+     or a frame reaches every edge of it rather than stopping at the band left
+     over for the wheel. Taken out of the column so it cannot push anything
+     around; layout() gives it the source's own size in pixels.
+
+     The shadow belongs to the wheel. On the wrapper it also fell across the
      winner banner once that was parented there to sit on the wheel's axis.
      Replaced by the wheel's own setting as soon as its state arrives. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
   filter: drop-shadow(var(--wh-shadow));
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* Above the canvas. Both are in-flow siblings of an absolutely positioned
+   element, which would otherwise paint over them. */
+.title,
+.result {
+  position: relative;
+  z-index: 1;
 }
 
 /* ------------------------------------------------------------------ result */

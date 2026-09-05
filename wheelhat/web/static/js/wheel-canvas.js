@@ -19,6 +19,9 @@ const REFERENCE_SIZE = 600;
 // drift apart and start disagreeing about what fits.
 export const TITLE_BAND = 52;
 export const RESULT_BAND = 84;
+//: Matches the `gap` on .stage in overlay.css. Lives here with the bands
+//: because the two are only ever used together to work out what is left.
+export const STAGE_GAP = 14;
 export const EDGE_PADDING = 24;
 //: A recommendation nobody can use is not a recommendation. Scaled-up
 //: artwork could otherwise suggest a source larger than any monitor.
@@ -173,7 +176,24 @@ function withAlpha(colour, opacity) {
 export function recommendedSource(appearance = {}) {
   const wheel = Math.max(120, Number(appearance.size) || DEFAULT_WHEEL_SIZE);
   const headroom = frameHeadroom(appearance);
-  const box = Math.ceil(wheel * (headroom.scale + headroom.offset));
+  // How much bigger than the wheel the artwork is asked to be.
+  //
+  // Showing all of a background fits it to the source and then multiplies by
+  // the layer's scale, and those cancel exactly - which is what stops it ever
+  // cropping, but also leaves the source as the only thing that decides how
+  // large the artwork is beside the wheel. Without this the scale slider moves
+  // nothing: a character taller than the wheel was shrunk to fit inside the
+  // source and disappeared behind it.
+  //
+  // Only when showing all of it. Filling the source crops by definition, and
+  // there a bigger source just draws the artwork bigger - growing it would
+  // inflate the recommendation without changing what anyone sees.
+  const showsAll = appearance.background_fit === 'contain';
+  const art =
+    showsAll && layerActive(appearance.background_image)
+      ? Math.max(1, Number(appearance.background_image?.scale) || 1)
+      : 1;
+  const box = Math.ceil(wheel * (headroom.scale + headroom.offset) * art);
   const title = appearance.show_title === false ? 0 : TITLE_BAND;
   const under =
     appearance.show_result !== false && (appearance.result_position || 'under') !== 'over';
@@ -305,9 +325,35 @@ export class WheelRenderer {
     this._lastTick = 0;
     this._resolveSpin = null;
     this._dpr = window.devicePixelRatio || 1;
+    // Which part of the canvas the wheel occupies, as fractions of it. The
+    // canvas covers the whole browser source so a background or a frame can
+    // reach every edge; the wheel itself only gets the band left between the
+    // title and the winner banner. Null means the whole canvas, which is what
+    // a preview with no chrome around it wants.
+    this.wheelBox = null;
     // An image that finishes loading after a draw needs the frame repainting.
     this._stopWatchingImages = onImageSettled(() => this.draw());
     this.resize();
+  }
+
+  /**
+   * Confine the wheel to part of the canvas.
+   *
+   * Fractions rather than pixels, so this survives the backing store being a
+   * device-pixel multiple of the CSS box and does not need recomputing when
+   * the display density changes.
+   */
+  setWheelBox(box) {
+    const same =
+      this.wheelBox &&
+      box &&
+      this.wheelBox.x === box.x &&
+      this.wheelBox.y === box.y &&
+      this.wheelBox.width === box.width &&
+      this.wheelBox.height === box.height;
+    if (same || (!this.wheelBox && !box)) return;
+    this.wheelBox = box ? { ...box } : null;
+    this.draw();
   }
 
   setState({ slices, appearance }) {
@@ -385,8 +431,15 @@ export class WheelRenderer {
     const ctx = this.ctx;
     const canvasWidth = this.canvas.width;
     const canvasHeight = this.canvas.height;
-    // The wheel is sized by the smaller dimension; the canvas may be wider.
-    const size = Math.min(canvasWidth, canvasHeight);
+    // The canvas is the whole browser source. The wheel gets whatever part of
+    // it the caller reserved - the band between the title and the winner
+    // banner - so that a background drawn to the canvas edges still lines up
+    // with a wheel that is not in the middle of them.
+    const area = this.wheelBox || { x: 0, y: 0, width: 1, height: 1 };
+    const areaWidth = canvasWidth * area.width;
+    const areaHeight = canvasHeight * area.height;
+    // The wheel is sized by the smaller dimension; its area may be wider.
+    const size = Math.min(areaWidth, areaHeight);
     if (!size) return;
     // Scale decorations with the wheel, not with the display density. Using the
     // device pixel ratio alone pinned text to a fixed CSS size however big the
@@ -398,8 +451,8 @@ export class WheelRenderer {
     // frame is drawn to the canvas edge and its outer edges are simply cropped,
     // because the canvas only ever had a few pixels of slack around the rim.
     const radius = wheelRadius(size, look, scale);
-    const cx = canvasWidth / 2;
-    const cy = canvasHeight / 2;
+    const cx = canvasWidth * area.x + areaWidth / 2;
+    const cy = canvasHeight * area.y + areaHeight / 2;
 
     // The element can be measured at zero width before layout settles.
     if (radius <= 4) return;

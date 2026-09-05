@@ -719,17 +719,24 @@ input[type='range'] {
   background: radial-gradient(circle at 50% 40%, #1b2030, #101319 70%);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  padding: 14px;
-  display: grid;
-  place-items: center;
+  /* The shape of the configured source, set by the editor. The canvas inside
+     is framed to what is actually drawn, so this crops rather than pads. */
   aspect-ratio: 1;
+  position: relative;
+  overflow: hidden;
 }
 
 .preview-box canvas {
-  width: 100%;
-  height: 100%;
+  /* Sized and offset by the editor to sit the drawn content in the middle with
+     a margin. Out of flow, so it cannot size this box: a canvas is a replaced
+     element with intrinsic dimensions - its drawing buffer - and left in flow
+     it set the box's height from whatever the buffer happened to be, which
+     overrode the shape entirely. */
+  position: absolute;
   display: block;
 }
+
+
 
 .tabs {
   display: flex;

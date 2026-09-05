@@ -7,21 +7,28 @@
     <link rel="stylesheet" href="/static/css/overlay.css" />
   </head>
   <body>
-    <div class="stage" id="stage" data-state="idle">
-      <div class="title" id="title" hidden></div>
+    <!-- Carries the scale that fits the composed source to the browser
+         source. Separate from the stage so that hiding the wheel between
+         spins, which is animated, cannot animate the fit as well. -->
+    <div class="fit" id="fit">
+      <div class="stage" id="stage" data-state="idle">
+        <div class="title" id="title" hidden></div>
 
-      <div class="wheel-wrap" id="wheelWrap">
+        <!-- The canvas covers the whole source so a background or a frame can
+             reach every edge of it. wheelWrap reserves the band the wheel is
+             drawn in, and carries the winner banner when that sits on the wheel. -->
         <canvas id="wheel"></canvas>
+        <div class="wheel-wrap" id="wheelWrap"></div>
+
+        <div class="result" id="result" hidden>
+          <div class="result-label">Winner</div>
+          <div class="result-value" id="resultValue"></div>
+        </div>
+
+        <div class="message" id="message" hidden></div>
+
+        <div class="connection" id="connection">Connecting…</div>
       </div>
-
-      <div class="result" id="result" hidden>
-        <div class="result-label">Winner</div>
-        <div class="result-value" id="resultValue"></div>
-      </div>
-
-      <div class="message" id="message" hidden></div>
-
-      <div class="connection" id="connection">Connecting…</div>
     </div>
 
     <script type="module" src="/static/js/overlay.js"></script>

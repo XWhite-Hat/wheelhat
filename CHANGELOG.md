@@ -75,6 +75,45 @@ First release.
   wheel, which the title and banner bands push off centre.
 - The version comes from the release tag at build time. The tree carries a
   placeholder, so a build from source is labelled as one.
+- The editor preview is framed to what is actually drawn, with a margin, rather
+  than showing the whole source. A source is sized to hold artwork whole and
+  artwork is usually padded - a background whose art covers two thirds of its
+  PNG left the wheel small in a lot of empty space. The bounds are measured from
+  the pixels, since nothing in the settings describes an image's own padding.
+  The preview keeps the source's shape and the overlay is unchanged.
+- The editor preview draws the wheel at the size it is set to. It was given the
+  whole band between the title and the winner banner, and the wheel is drawn at
+  the smaller side of the box it gets - so the preview's wheel grew with the
+  source, and a background enlarged to sit around it grew by the same amount and
+  stayed hidden behind it.
+- The recommended source size follows every change to the look, not only the
+  ones made in its own card. It was recomputed on mount, on its own inputs and
+  when an image loaded, so moving anything else left it stale - which made the
+  background's scale look like it did nothing at all.
+- "Show all of it" backgrounds can now be larger than the wheel. The artwork is
+  fitted to the source and then multiplied by the layer's scale, and those
+  cancel exactly - so the source is what decides how big the artwork is beside
+  the wheel, and the recommended source now grows with that scale. Artwork with
+  a shape around the wheel - a character, a frame - is shown whole with a margin
+  on every side instead of being shrunk behind it.
+- The wheel is drawn at the size it is set to. It used to be drawn at the
+  smaller side of all the room left over, so it grew with the source: enlarging
+  a source to fit artwork scaled the wheel up by the same amount and the artwork
+  never gained on it. Wheels on a source larger than their set size will be
+  slightly smaller than before, and now match the number in the editor.
+- The overlay is composed at the wheel's configured source size and scaled to
+  fit the browser source, so it shows the same view at any size and matches the
+  editor preview. It used to lay out to the window, and a background is fitted
+  to the box it is given - the same wheel in a 1005x904 source and in a
+  maximised tab got two different crops. Resizing a source now scales the
+  picture instead of recropping it.
+- A background and a frame now cover the whole browser source in the overlay,
+  as the editor preview always showed them. The overlay drew them on a canvas
+  that stopped short of the title and the winner banner, so artwork was fitted
+  to a box shorter than the source and cropped differently from the preview.
+- The editor preview is the shape of the configured source again. Its canvas
+  was sizing the box it sits in, which overrode that shape - a landscape source
+  was previewed in a portrait box.
 - The wheel no longer grows past the space reserved for it. The canvas took
   its height from a percentage that resolved against a grid row sized by the
   canvas itself, so each layout pass made it taller until it went square and
