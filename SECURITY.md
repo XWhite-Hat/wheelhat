@@ -22,9 +22,8 @@ than any individual bug:
   Streamer.bot WebSocket passwords, the VTube Studio plugin token, and Twitch
   OAuth tokens. They are protected by your operating system's file permissions
   and nothing more. Settings shows the exact path.
-- Twitch sign-in uses the device code flow against **your own** Twitch
-  application. No password is ever entered into WheelHat, and no token is sent
-  anywhere except Twitch.
+- Twitch sign-in uses the device code flow against WheelHat's registered application
+  and it can be revoked at any time from [here](https://www.twitch.tv/settings/connections).
 
 Reports that are in scope include: a way to reach the API from outside the
 bound interface, a path that executes actions without the shell setting enabled,
